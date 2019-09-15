@@ -105,12 +105,17 @@ boolean			messageNeedsInput;
 
 void    (*messageRoutine)(int response);
 
-char gammamsg[5][26] =
+// [crispy] intermediate gamma levels
+char gammamsg[5+4][26+2] =
 {
     GAMMALVL0,
+    GAMMALVL05,
     GAMMALVL1,
+    GAMMALVL15,
     GAMMALVL2,
+    GAMMALVL25,
     GAMMALVL3,
+    GAMMALVL35,
     GAMMALVL4
 };
 
@@ -146,8 +151,8 @@ short		whichCursor;		// which skull to draw
 
 // graphic name of cursors
 // haleyjd 08/27/10: [STRIFE] M_SKULL* -> M_CURS*
-char    *cursorName[8] = {"M_CURS1", "M_CURS2", "M_CURS3", "M_CURS4", 
-                          "M_CURS5", "M_CURS6", "M_CURS7", "M_CURS8" };
+const char *cursorName[8] = {"M_CURS1", "M_CURS2", "M_CURS3", "M_CURS4",
+                             "M_CURS5", "M_CURS6", "M_CURS7", "M_CURS8" };
 
 // haleyjd 20110210 [STRIFE]: skill level for menus
 int menuskill;
@@ -555,7 +560,7 @@ void M_ReadSaveStrings(void)
         handle = fopen(fname, "rb");
         if(handle == NULL)
         {
-            M_StringCopy(savegamestrings[i], EMPTYSTRING,
+            M_StringCopy(savegamestrings[i], DEH_String(EMPTYSTRING),
                          sizeof(savegamestrings[i]));
             LoadMenu[i].status = 0;
             continue;
@@ -774,7 +779,7 @@ void M_SaveSelect(int choice)
         M_snprintf(savegamestrings[choice], SAVESTRINGSIZE - 1,
                    "PLAYER%i", itemOn + 1);
 #endif
-    if (!strcmp(savegamestrings[choice],EMPTYSTRING))
+    if (!strcmp(savegamestrings[choice], DEH_String(EMPTYSTRING)))
         savegamestrings[choice][0] = 0;
     saveCharIndex = strlen(savegamestrings[choice]);
 }
@@ -1581,7 +1586,7 @@ M_WriteText
         w = SHORT (hu_font[c]->width);
 
         // haleyjd 09/04/10: [STRIFE] Different linebreak handling
-        if (cx + w > SCREENWIDTH - 20)
+        if (cx + w > ORIGWIDTH - 20)
         {
             cx = x;
             cy += 11;
@@ -1609,7 +1614,7 @@ M_WriteText
 //
 void M_DialogDimMsg(int x, int y, char *str, boolean useyfont)
 {
-    int rightbound = (SCREENWIDTH - 20) - x;
+    int rightbound = (ORIGWIDTH - 20) - x;
     patch_t **fontarray;  // ebp
     int linewidth = 0;    // esi
     int i = 0;            // edx
@@ -2100,7 +2105,7 @@ boolean M_Responder (event_t* ev)
         else if (key == key_menu_gamma)    // gamma toggle
         {
             usegamma++;
-            if (usegamma > 4)
+            if (usegamma > 4+4) // [crispy] intermediate gamma levels
                 usegamma = 0;
             players[consoleplayer].message = DEH_String(gammamsg[usegamma]);
             I_SetPalette (W_CacheLumpName (DEH_String("PLAYPAL"),PU_CACHE));

@@ -21,6 +21,7 @@
 #include <ctype.h>
 
 #include "doomtype.h"
+#include "i_glob.h"
 #include "i_system.h"
 #include "d_iwad.h"
 #include "m_argv.h"
@@ -28,23 +29,24 @@
 
 #include "deh_defs.h"
 #include "deh_io.h"
+#include "deh_main.h"
 
 extern deh_section_t *deh_section_types[];
-extern char *deh_signatures[];
+extern const char *deh_signatures[];
 
 static boolean deh_initialized = false;
 
 // If true, we can parse [STRINGS] sections in BEX format.
 
-boolean deh_allow_extended_strings = false;
+boolean deh_allow_extended_strings = true; // [crispy] always allow
 
 // If true, we can do long string replacements.
 
-boolean deh_allow_long_strings = false;
+boolean deh_allow_long_strings = true; // [crispy] always allow
 
 // If true, we can do cheat replacements longer than the originals.
 
-boolean deh_allow_long_cheats = false;
+boolean deh_allow_long_cheats = true; // [crispy] always allow
 
 // If false, dehacked cheat replacements are ignored.
 
@@ -200,11 +202,17 @@ boolean DEH_ParseAssignment(char *line, char **variable_name, char **value)
     return true;
 }
 
+extern void DEH_SaveLineStart (deh_context_t *context);
+extern void DEH_RestoreLineStart (deh_context_t *context);
+
 static boolean CheckSignatures(deh_context_t *context)
 {
     size_t i;
     char *line;
     
+    // [crispy] save pointer to start of line (should be 0 here)
+    DEH_SaveLineStart(context);
+
     // Read the first line
 
     line = DEH_ReadLine(context, false);
@@ -223,6 +231,10 @@ static boolean CheckSignatures(deh_context_t *context)
             return true;
         }
     }
+
+    // [crispy] not a valid signature, try parsing this line again
+    // and see if it starts with a section marker
+    DEH_RestoreLineStart(context);
 
     return false;
 }
@@ -281,6 +293,7 @@ static void DEH_ParseComment(char *comment)
 static void DEH_ParseContext(deh_context_t *context)
 {
     deh_section_t *current_section = NULL;
+    deh_section_t *prev_section = NULL; // [crispy] remember previous line parser
     char section_name[20];
     void *tag = NULL;
     boolean extended;
@@ -290,7 +303,8 @@ static void DEH_ParseContext(deh_context_t *context)
 
     if (!CheckSignatures(context))
     {
-        DEH_Error(context, "This is not a valid dehacked patch file!");
+        // [crispy] make non-fatal
+        fprintf(stderr, "This is not a valid dehacked patch file!\n");
     }
 
     // Read the file
@@ -301,6 +315,8 @@ static void DEH_ParseContext(deh_context_t *context)
         // for the BEX [STRINGS] section.
         extended = current_section != NULL
                 && !strcasecmp(current_section->name, "[STRINGS]");
+        // [crispy] save pointer to start of line, just in case
+        DEH_SaveLineStart(context);
         line = DEH_ReadLine(context, extended);
 
         // end of file?
@@ -332,6 +348,17 @@ static void DEH_ParseContext(deh_context_t *context)
                     current_section->end(context, tag);
                 }
 
+                // [crispy] if this was a BEX line parser, remember it in case
+                // the next section does not start with a section marker
+                if (current_section->name[0] == '[')
+                {
+                    prev_section = current_section;
+                }
+                else
+                {
+                    prev_section = NULL;
+                }
+
                 //printf("end %s tag\n", current_section->name);
                 current_section = NULL;
             }
@@ -358,6 +385,14 @@ static void DEH_ParseContext(deh_context_t *context)
                     //printf("started %s tag\n", section_name);
                 }
                 else
+                if (prev_section != NULL)
+                {
+                    // [crispy] try this line again with the previous line parser
+                    DEH_RestoreLineStart(context);
+                    current_section = prev_section;
+                    prev_section = NULL;
+                }
+                else
                 {
                     //printf("unknown section name %s\n", section_name);
                 }
@@ -380,9 +415,12 @@ int DEH_LoadFile(const char *filename)
     // Before parsing a new file, reset special override flags to false.
     // Magic comments should only apply to the file in which they were
     // defined, and shouldn't carry over to subsequent files as well.
+    // [crispy] always allow everything
+/*
     deh_allow_long_strings = false;
     deh_allow_long_cheats = false;
     deh_allow_extended_strings = false;
+*/
 
     printf(" loading %s\n", filename);
 
@@ -406,6 +444,28 @@ int DEH_LoadFile(const char *filename)
     return 1;
 }
 
+// Load all dehacked patches from the given directory.
+void DEH_AutoLoadPatches(const char *path)
+{
+    const char *filename;
+    glob_t *glob;
+
+    glob = I_StartMultiGlob(path, GLOB_FLAG_NOCASE|GLOB_FLAG_SORTED,
+                            "*.deh", "*.bex", "*.hhe", "*.seh", NULL); // [crispy] *.bex
+    for (;;)
+    {
+        filename = I_NextGlob(glob);
+        if (filename == NULL)
+        {
+            break;
+        }
+        printf(" [autoload]");
+        DEH_LoadFile(filename);
+    }
+
+    I_EndGlob(glob);
+}
+
 // Load dehacked file from WAD lump.
 // If allow_long is set, allow long strings and cheats just for this lump.
 
@@ -419,9 +479,12 @@ int DEH_LoadLump(int lumpnum, boolean allow_long, boolean allow_error)
     }
 
     // Reset all special flags to defaults.
+    // [crispy] always allow everything
+/*
     deh_allow_long_strings = allow_long;
     deh_allow_long_cheats = allow_long;
     deh_allow_extended_strings = false;
+*/
 
     context = DEH_OpenLump(lumpnum);
 

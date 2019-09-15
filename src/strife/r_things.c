@@ -75,8 +75,8 @@ lighttable_t**	spritelights;
 
 // constant arrays
 //  used for psprite clipping and initializing clipping
-short		negonearray[SCREENWIDTH];
-short		screenheightarray[SCREENWIDTH];
+short		negonearray[MAXWIDTH];
+short		screenheightarray[MAXWIDTH];
 
 
 //
@@ -171,9 +171,9 @@ R_InstallSpriteLump
 //  letter/number appended.
 // The rotation character can be 0 to signify no rotations.
 //
-void R_InitSpriteDefs (char** namelist) 
+void R_InitSpriteDefs (const char** namelist)
 { 
-    char**	check;
+    const char **check;
     int		i;
     int		l;
     int		frame;
@@ -292,7 +292,7 @@ int             sprbotscreen;       // villsa [STRIFE]
 // R_InitSprites
 // Called at program start.
 //
-void R_InitSprites (char** namelist)
+void R_InitSprites (const char** namelist)
 {
     int		i;
 	
@@ -651,7 +651,7 @@ void R_ProjectSprite (mobj_t* thing)
     else
     {
 	// diminished light
-	index = xscale>>(LIGHTSCALESHIFT-detailshift);
+	index = xscale>>(LIGHTSCALESHIFT-detailshift+crispy->hires);
 
 	if (index >= MAXLIGHTSCALE) 
 	    index = MAXLIGHTSCALE-1;
@@ -767,7 +767,7 @@ void R_DrawPSprite (pspdef_t* psp)
     }
 
     // villsa [STRIFE] calculate y offset with view pitch
-    vis->texturemid = ((BASEYCENTER<<FRACBITS)+FRACUNIT/2)-(psp->sy-spritetopoffset[lump])
+    vis->texturemid = ((BASEYCENTER<<FRACBITS)/*+FRACUNIT/2*/)-(psp->sy-spritetopoffset[lump])
         + FixedMul(vis->xiscale, (centery-viewheight/2)<<FRACBITS);
 
     if (vis->x1 > x1)
@@ -920,8 +920,8 @@ void R_SortVisSprites (void)
 void R_DrawSprite (vissprite_t* spr)
 {
     drawseg_t*		ds;
-    short		clipbot[SCREENWIDTH];
-    short		cliptop[SCREENWIDTH];
+    short		clipbot[MAXWIDTH];
+    short		cliptop[MAXWIDTH];
     int			x;
     int			r1;
     int			r2;

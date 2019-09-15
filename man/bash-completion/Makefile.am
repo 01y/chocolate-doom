@@ -1,4 +1,4 @@
-bashcompletiondir=@bashcompletiondir@
+bashcompletiondir=@datadir@/bash-completion/completions
 
 BASH_COMPLETION_TEMPLATES = \
     doom.template \
@@ -9,10 +9,10 @@ BASH_COMPLETION_TEMPLATES = \
 if HAVE_PYTHON
 
 BASH_COMPLETION_SCRIPTLETS = \
-    @PROGRAM_PREFIX@doom \
-    @PROGRAM_PREFIX@heretic \
-    @PROGRAM_PREFIX@hexen \
-    @PROGRAM_PREFIX@strife
+    @PROGRAM_PREFIX@doom
+#   @PROGRAM_PREFIX@heretic \
+#   @PROGRAM_PREFIX@hexen \
+#   @PROGRAM_PREFIX@strife
 
 bashcompletion_DATA = $(BASH_COMPLETION_SCRIPTLETS)
 CLEANFILES = $(BASH_COMPLETION_SCRIPTLETS)

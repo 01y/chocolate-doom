@@ -30,6 +30,7 @@
 #include "hu_stuff.h"
 
 #include "s_sound.h"
+#include "s_musinfo.h" // [crispy] S_ParseMusInfo()
 
 #include "doomstat.h"
 
@@ -75,8 +76,8 @@ P_SetMobjState
 
 	// Modified handling.
 	// Call action functions when the state is set
-	if (st->action.acp1)		
-	    st->action.acp1(mobj);	
+	if (st->action.acp3)
+	    st->action.acp3(mobj, NULL, NULL); // [crispy] let pspr action pointers get called from mobj states
 	
 	state = st->nextstate;
 
@@ -89,27 +90,66 @@ P_SetMobjState
     return true;
 }
 
+// [crispy] return the latest "safe" state in a state sequence,
+// so that no action pointer is ever called
+static statenum_t P_LatestSafeState(statenum_t state)
+{
+    statenum_t safestate = S_NULL;
+    static statenum_t laststate, lastsafestate;
+
+    if (state == laststate)
+    {
+	return lastsafestate;
+    }
+
+    for (laststate = state; state != S_NULL; state = states[state].nextstate)
+    {
+	if (safestate == S_NULL)
+	{
+	    safestate = state;
+	}
+
+	if (states[state].action.acp1)
+	{
+	    safestate = S_NULL;
+	}
+
+	// [crispy] a state with -1 tics never changes
+	if (states[state].tics == -1)
+	{
+	    break;
+	}
+    }
+
+    return lastsafestate = safestate;
+}
 
 //
 // P_ExplodeMissile  
 //
-void P_ExplodeMissile (mobj_t* mo)
+static void P_ExplodeMissileSafe (mobj_t* mo, boolean safe)
 {
     mo->momx = mo->momy = mo->momz = 0;
 
-    P_SetMobjState (mo, mobjinfo[mo->type].deathstate);
+    P_SetMobjState (mo, safe ? P_LatestSafeState(mobjinfo[mo->type].deathstate) : mobjinfo[mo->type].deathstate);
 
-    mo->tics -= P_Random()&3;
+    mo->tics -= safe ? Crispy_Random()&3 : P_Random()&3;
 
     if (mo->tics < 1)
 	mo->tics = 1;
 
     mo->flags &= ~MF_MISSILE;
+    // [crispy] missile explosions are translucent
+    mo->flags |= MF_TRANSLUCENT;
 
     if (mo->info->deathsound)
 	S_StartSound (mo, mo->info->deathsound);
 }
 
+void P_ExplodeMissile (mobj_t* mo)
+{
+    return P_ExplodeMissileSafe(mo, false);
+}
 
 //
 // P_XYMovement  
@@ -178,18 +218,26 @@ void P_XYMovement (mobj_t* mo)
 	    }
 	    else if (mo->flags & MF_MISSILE)
 	    {
+		boolean safe = false;
 		// explode a missile
 		if (ceilingline &&
 		    ceilingline->backsector &&
 		    ceilingline->backsector->ceilingpic == skyflatnum)
 		{
+		    if (mo->z > ceilingline->backsector->ceilingheight)
+		    {
 		    // Hack to prevent missiles exploding
 		    // against the sky.
 		    // Does not handle sky floors.
 		    P_RemoveMobj (mo);
 		    return;
+		    }
+		    else
+		    {
+			safe = true;
+		    }
 		}
-		P_ExplodeMissile (mo);
+		P_ExplodeMissileSafe (mo, safe);
 	    }
 	    else
 		mo->momx = mo->momy = 0;
@@ -324,6 +372,9 @@ void P_ZMovement (mobj_t* mo)
 	
 	if (mo->momz < 0)
 	{
+	    // [crispy] delay next jump
+	    if (mo->player)
+		mo->player->jumpTics = 7;
 	    if (mo->player
 		&& mo->momz < -GRAVITY*8)	
 	    {
@@ -332,7 +383,16 @@ void P_ZMovement (mobj_t* mo)
 		// after hitting the ground (hard),
 		// and utter appropriate sound.
 		mo->player->deltaviewheight = mo->momz>>3;
+		// [crispy] squat down weapon sprite as well
+		mo->player->psp_dy_max = mo->momz>>2;
+		// [crispy] center view if not using permanent mouselook
+		if (!crispy->mouselook)
+		    mo->player->centering = true;
+		// [crispy] dead men don't say "oof"
+		if (mo->health > 0 || !crispy->soundfix)
+		{
 		S_StartSound (mo, sfx_oof);
+		}
 	    }
 	    mo->momz = 0;
 	}
@@ -437,6 +497,9 @@ P_NightmareRespawn (mobj_t* mobj)
     mo->spawnpoint = mobj->spawnpoint;	
     mo->angle = ANG45 * (mthing->angle/45);
 
+    // [crispy] count respawned monsters
+    extrakills++;
+
     if (mthing->options & MTF_AMBUSH)
 	mo->flags |= MF_AMBUSH;
 
@@ -446,12 +509,48 @@ P_NightmareRespawn (mobj_t* mobj)
     P_RemoveMobj (mobj);
 }
 
+// [crispy] support MUSINFO lump (dynamic music changing)
+static inline void MusInfoThinker (mobj_t *thing)
+{
+	if (musinfo.mapthing != thing &&
+	    thing->subsector->sector == players[displayplayer].mo->subsector->sector)
+	{
+		musinfo.lastmapthing = musinfo.mapthing;
+		musinfo.mapthing = thing;
+		musinfo.tics = leveltime ? 30 : 0;
+	}
+}
 
 //
 // P_MobjThinker
 //
 void P_MobjThinker (mobj_t* mobj)
 {
+    // [crispy] support MUSINFO lump (dynamic music changing)
+    if (mobj->type == MT_MUSICSOURCE)
+    {
+	return MusInfoThinker(mobj);
+    }
+    // [crispy] suppress interpolation of player missiles for the first tic
+    if (mobj->interp == -1)
+    {
+        mobj->interp = false;
+    }
+    else
+    // [AM] Handle interpolation unless we're an active player.
+    if (!(mobj->player != NULL && mobj == mobj->player->mo))
+    {
+        // Assume we can interpolate at the beginning
+        // of the tic.
+        mobj->interp = true;
+
+        // Store starting position for mobj interpolation.
+        mobj->oldx = mobj->x;
+        mobj->oldy = mobj->y;
+        mobj->oldz = mobj->z;
+        mobj->oldangle = mobj->angle;
+    }
+
     // momentum movement
     if (mobj->momx
 	|| mobj->momy
@@ -514,12 +613,13 @@ void P_MobjThinker (mobj_t* mobj)
 //
 // P_SpawnMobj
 //
-mobj_t*
-P_SpawnMobj
+static mobj_t*
+P_SpawnMobjSafe
 ( fixed_t	x,
   fixed_t	y,
   fixed_t	z,
-  mobjtype_t	type )
+  mobjtype_t	type,
+  boolean safe )
 {
     mobj_t*	mobj;
     state_t*	st;
@@ -541,10 +641,10 @@ P_SpawnMobj
     if (gameskill != sk_nightmare)
 	mobj->reactiontime = info->reactiontime;
     
-    mobj->lastlook = P_Random () % MAXPLAYERS;
+    mobj->lastlook = safe ? Crispy_Random () % MAXPLAYERS : P_Random () % MAXPLAYERS;
     // do not set the state with P_SetMobjState,
     // because action routines can not be called yet
-    st = &states[info->spawnstate];
+    st = &states[safe ? P_LatestSafeState(info->spawnstate) : info->spawnstate];
 
     mobj->state = st;
     mobj->tics = st->tics;
@@ -564,6 +664,21 @@ P_SpawnMobj
     else 
 	mobj->z = z;
 
+    // [crispy] randomly flip corpse, blood and death animation sprites
+    if (mobj->flags & MF_FLIPPABLE && !(mobj->flags & MF_SHOOTABLE))
+    {
+	mobj->health = (mobj->health & (int)~1) - (Crispy_Random() & 1);
+    }
+    
+    // [AM] Do not interpolate on spawn.
+    mobj->interp = false;
+
+    // [AM] Just in case interpolation is attempted...
+    mobj->oldx = mobj->x;
+    mobj->oldy = mobj->y;
+    mobj->oldz = mobj->z;
+    mobj->oldangle = mobj->angle;
+
     mobj->thinker.function.acp1 = (actionf_p1)P_MobjThinker;
 	
     P_AddThinker (&mobj->thinker);
@@ -571,6 +686,15 @@ P_SpawnMobj
     return mobj;
 }
 
+mobj_t*
+P_SpawnMobj
+( fixed_t	x,
+  fixed_t	y,
+  fixed_t	z,
+  mobjtype_t	type )
+{
+	return P_SpawnMobjSafe(x, y, z, type, false);
+}
 
 //
 // P_RemoveMobj
@@ -600,8 +724,16 @@ void P_RemoveMobj (mobj_t* mobj)
     // unlink from sector and block lists
     P_UnsetThingPosition (mobj);
     
+    // [crispy] removed map objects may finish their sounds
+    if (crispy->soundfull)
+    {
+	S_UnlinkSound(mobj);
+    }
+    else
+    {
     // stop any playing sound
     S_StopSound (mobj);
+    }
     
     // free block
     P_RemoveThinker ((thinker_t*)mobj);
@@ -626,7 +758,8 @@ void P_RespawnSpecials (void)
     int			i;
 
     // only respawn items in deathmatch
-    if (deathmatch != 2)
+    // AX: deathmatch 3 is a Crispy-specific change
+    if (deathmatch != 2 && deathmatch != 3)
 	return;	// 
 
     // nothing left to respawn?
@@ -677,6 +810,13 @@ void P_RespawnSpecials (void)
 
 
 
+// [crispy] weapon sound sources
+degenmobj_t muzzles[MAXPLAYERS];
+
+mobj_t *Crispy_PlayerSO (int p)
+{
+	return crispy->soundfull ? (mobj_t *) &muzzles[p] : players[p].mo;
+}
 
 //
 // P_SpawnPlayer
@@ -732,6 +872,9 @@ void P_SpawnPlayer (mapthing_t* mthing)
     p->fixedcolormap = 0;
     p->viewheight = VIEWHEIGHT;
 
+    // [crispy] weapon sound source
+    p->so = Crispy_PlayerSO(mthing->type-1);
+
     // setup gun psprite
     P_SetupPsprites (p);
     
@@ -763,6 +906,7 @@ void P_SpawnMapThing (mapthing_t* mthing)
     fixed_t		x;
     fixed_t		y;
     fixed_t		z;
+    int			musid = 0;
 		
     // count deathmatch start positions
     if (mthing->type == 11)
@@ -788,6 +932,7 @@ void P_SpawnMapThing (mapthing_t* mthing)
     {
 	// save spots for respawning in network games
 	playerstarts[mthing->type-1] = *mthing;
+	playerstartsingame[mthing->type-1] = true;
 	if (!deathmatch)
 	    P_SpawnPlayer (mthing);
 
@@ -805,18 +950,36 @@ void P_SpawnMapThing (mapthing_t* mthing)
     else
 	bit = 1<<(gameskill-1);
 
+    // [crispy] warn about mapthings without any skill tag set
+    if (!(mthing->options & (MTF_EASY|MTF_NORMAL|MTF_HARD)))
+    {
+	fprintf(stderr, "P_SpawnMapThing: Mapthing type %i without any skill tag at (%i, %i)\n",
+	       mthing->type, mthing->x, mthing->y);
+    }
+
     if (!(mthing->options & bit) )
 	return;
 	
+    // [crispy] support MUSINFO lump (dynamic music changing)
+    if (mthing->type >= 14100 && mthing->type <= 14164)
+    {
+	musid = mthing->type - 14100;
+	mthing->type = mobjinfo[MT_MUSICSOURCE].doomednum;
+    }
+
     // find which type to spawn
     for (i=0 ; i< NUMMOBJTYPES ; i++)
 	if (mthing->type == mobjinfo[i].doomednum)
 	    break;
 	
     if (i==NUMMOBJTYPES)
-	I_Error ("P_SpawnMapThing: Unknown type %i at (%i, %i)",
+    {
+	// [crispy] ignore unknown map things
+	fprintf (stderr, "P_SpawnMapThing: Unknown type %i at (%i, %i)\n",
 		 mthing->type,
 		 mthing->x, mthing->y);
+	return;
+    }
 		
     // don't spawn keycards and players in deathmatch
     if (deathmatch && mobjinfo[i].flags & MF_NOTDMATCH)
@@ -852,6 +1015,34 @@ void P_SpawnMapThing (mapthing_t* mthing)
     mobj->angle = ANG45 * (mthing->angle/45);
     if (mthing->options & MTF_AMBUSH)
 	mobj->flags |= MF_AMBUSH;
+
+    // [crispy] support MUSINFO lump (dynamic music changing)
+    if (i == MT_MUSICSOURCE)
+    {
+	mobj->health = 1000 + musid;
+    }
+
+    // [crispy] Lost Souls bleed Puffs
+    if (crispy->coloredblood && i == MT_SKULL)
+        mobj->flags |= MF_NOBLOOD;
+
+    // [crispy] randomly colorize space marine corpse objects
+    if (!netgame && crispy->coloredblood &&
+        (mobj->info->spawnstate == S_PLAY_DIE7 ||
+        mobj->info->spawnstate == S_PLAY_XDIE9))
+    {
+	mobj->flags |= (Crispy_Random() & 3) << MF_TRANSSHIFT;
+    }
+
+    // [crispy] blinking key or skull in the status bar
+    if (mobj->sprite == SPR_BSKU)
+	st_keyorskull[it_bluecard] = 3;
+    else
+    if (mobj->sprite == SPR_RSKU)
+	st_keyorskull[it_redcard] = 3;
+    else
+    if (mobj->sprite == SPR_YSKU)
+	st_keyorskull[it_yellowcard] = 3;
 }
 
 
@@ -872,20 +1063,30 @@ P_SpawnPuff
   fixed_t	y,
   fixed_t	z )
 {
+    return P_SpawnPuffSafe(x, y, z, false);
+}
+
+void
+P_SpawnPuffSafe
+( fixed_t	x,
+  fixed_t	y,
+  fixed_t	z,
+  boolean	safe )
+{
     mobj_t*	th;
 	
-    z += (P_SubRandom() << 10);
+    z += safe ? (Crispy_SubRandom() << 10) : (P_SubRandom() << 10);
 
-    th = P_SpawnMobj (x,y,z, MT_PUFF);
+    th = P_SpawnMobjSafe (x,y,z, MT_PUFF, safe);
     th->momz = FRACUNIT;
-    th->tics -= P_Random()&3;
+    th->tics -= safe ? Crispy_Random()&3 : P_Random()&3;
 
     if (th->tics < 1)
 	th->tics = 1;
 	
     // don't make punches spark on the wall
     if (attackrange == MELEERANGE)
-	P_SetMobjState (th, S_PUFF3);
+	P_SetMobjState (th, safe ? P_LatestSafeState(S_PUFF3) : S_PUFF3);
 }
 
 
@@ -898,7 +1099,8 @@ P_SpawnBlood
 ( fixed_t	x,
   fixed_t	y,
   fixed_t	z,
-  int		damage )
+  int		damage,
+  mobj_t*	target ) // [crispy] pass thing type
 {
     mobj_t*	th;
 	
@@ -914,6 +1116,13 @@ P_SpawnBlood
 	P_SetMobjState (th,S_BLOOD2);
     else if (damage < 9)
 	P_SetMobjState (th,S_BLOOD3);
+
+    // [crispy] connect blood object with the monster that bleeds it
+    th->target = target;
+
+    // [crispy] Spectres bleed spectre blood
+    if (crispy->coloredblood)
+	th->flags |= (target->flags & MF_SHADOW);
 }
 
 
@@ -1024,8 +1233,16 @@ P_SpawnPlayerMissile
     fixed_t	z;
     fixed_t	slope;
     
+    extern void A_Recoil (player_t* player);
+
     // see which target is to be aimed at
     an = source->angle;
+    if (critical->freeaim == FREEAIM_DIRECT)
+    {
+	slope = PLAYER_SLOPE(source->player);
+    }
+    else
+    {
     slope = P_AimLineAttack (source, an, 16*64*FRACUNIT);
     
     if (!linetarget)
@@ -1042,8 +1259,12 @@ P_SpawnPlayerMissile
 	if (!linetarget)
 	{
 	    an = source->angle;
+	    if (critical->freeaim == FREEAIM_BOTH)
+               slope = PLAYER_SLOPE(source->player);
+	    else
 	    slope = 0;
 	}
+    }
     }
 		
     x = source->x;
@@ -1062,7 +1283,11 @@ P_SpawnPlayerMissile
     th->momy = FixedMul( th->info->speed,
 			 finesine[an>>ANGLETOFINESHIFT]);
     th->momz = FixedMul( th->info->speed, slope);
+    // [crispy] suppress interpolation of player missiles for the first tic
+    th->interp = -1;
 
     P_CheckMissileSpawn (th);
+
+    A_Recoil (source->player);
 }
 

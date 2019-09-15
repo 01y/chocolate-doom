@@ -33,13 +33,13 @@
 
 typedef struct
 {
-    char *name;  // Config file name
+    const char *name;  // Config file name
     int value;
 } joystick_config_t;
 
 typedef struct
 {
-    char *name;
+    const char *name;
     int axes, buttons, hats;
     const joystick_config_t *configs;
 } known_joystick_t;
@@ -972,7 +972,7 @@ static void CalibrateJoystick(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(unused))
 // GUI
 //
 
-static void AddJoystickControl(TXT_UNCAST_ARG(table), char *label, int *var)
+static void AddJoystickControl(TXT_UNCAST_ARG(table), const char *label, int *var)
 {
     TXT_CAST_ARG(txt_table_t, table);
     txt_joystick_input_t *joy_input;
@@ -986,7 +986,7 @@ static void AddJoystickControl(TXT_UNCAST_ARG(table), char *label, int *var)
                    NULL);
 }
 
-void ConfigJoystick(void)
+void ConfigJoystick(TXT_UNCAST_ARG(widget), void *user_data)
 {
     txt_window_t *window;
 
@@ -1030,7 +1030,7 @@ void ConfigJoystick(void)
                    TXT_TABLE_EMPTY,
                    NULL);
 
-    if (gamemission == heretic || gamemission == hexen || gamemission == strife)
+    if (gamemission == doom || gamemission == heretic || gamemission == hexen || gamemission == strife) // [crispy]
     {
         TXT_AddWidgets(window,
                    TXT_NewLabel("Look up/down"),
@@ -1066,7 +1066,7 @@ void ConfigJoystick(void)
         AddJoystickControl(window, "Speed", &joybspeed);
     }
 
-    if (gamemission == hexen || gamemission == strife)
+    if (gamemission == doom || gamemission == hexen || gamemission == strife) // [crispy]
     {
         AddJoystickControl(window, "Jump", &joybjump);
     }

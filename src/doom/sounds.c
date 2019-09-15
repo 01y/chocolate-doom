@@ -61,6 +61,27 @@ musicinfo_t S_music[] =
     MUSIC("e3m7"),
     MUSIC("e3m8"),
     MUSIC("e3m9"),
+    // [crispy] support dedicated music tracks for the 4th episode
+    MUSIC("e4m1"),
+    MUSIC("e4m2"),
+    MUSIC("e4m3"),
+    MUSIC("e4m4"),
+    MUSIC("e4m5"),
+    MUSIC("e4m6"),
+    MUSIC("e4m7"),
+    MUSIC("e4m8"),
+    MUSIC("e4m9"),
+    // [crispy] Sigil
+    MUSIC("e5m1"),
+    MUSIC("e5m2"),
+    MUSIC("e5m3"),
+    MUSIC("e5m4"),
+    MUSIC("e5m5"),
+    MUSIC("e5m6"),
+    MUSIC("e5m7"),
+    MUSIC("e5m8"),
+    MUSIC("e5m9"),
+    MUSIC("sigint"),
     MUSIC("inter"),
     MUSIC("intro"),
     MUSIC("bunny"),
@@ -100,7 +121,9 @@ musicinfo_t S_music[] =
     MUSIC("ultima"),
     MUSIC("read_m"),
     MUSIC("dm2ttl"),
-    MUSIC("dm2int") 
+    MUSIC("dm2int"),
+    MUSIC(NULL),
+    MUSIC("musinfo")
 };
 
 
@@ -225,5 +248,13 @@ sfxinfo_t S_sfx[] =
   SOUND("skesit", 70),
   SOUND("skeatk", 70),
   SOUND("radio",  60),
+  // [crispy] additional BOOM and MBF states, sprites and code pointers
+  SOUND("dgsit",  98),
+  SOUND("dgatk",  70),
+  SOUND("dgact", 120),
+  SOUND("dgdth",  70),
+  SOUND("dgpain", 96),
+  // [crispy] play DSSECRET if available
+  SOUND("secret",  60),
 };
 

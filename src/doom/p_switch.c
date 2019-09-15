@@ -23,6 +23,9 @@
 #include "deh_main.h"
 #include "doomdef.h"
 #include "p_local.h"
+#include "i_swap.h" // [crispy] SHORT()
+#include "w_wad.h" // [crispy] W_CheckNumForName()
+#include "z_zone.h" // [crispy] PU_STATIC
 
 #include "g_game.h"
 
@@ -39,7 +42,8 @@
 //
 // CHANGE THE TEXTURE OF A WALL SWITCH TO ITS OPPOSITE
 //
-switchlist_t alphSwitchList[] =
+// [crispy] add support for SWITCHES lumps
+switchlist_t alphSwitchList_vanilla[] =
 {
     // Doom shareware episode 1 switches
     {"SW1BRCOM",	"SW2BRCOM",	1},
@@ -86,11 +90,17 @@ switchlist_t alphSwitchList[] =
     {"SW1TEK",		"SW2TEK",	3},
     {"SW1MARB",	"SW2MARB",	3},
     {"SW1SKULL",	"SW2SKULL",	3},
+
+    // [crispy] SWITCHES lumps are supposed to end like this
+    {"\0",		"\0",		0}
 };
 
-int		switchlist[MAXSWITCHES * 2];
+// [crispy] remove MAXSWITCHES limit
+int		*switchlist;
 int		numswitches;
-button_t        buttonlist[MAXBUTTONS];
+static size_t	maxswitches;
+button_t        *buttonlist; // [crispy] remove MAXBUTTONS limit
+int		maxbuttons; // [crispy] remove MAXBUTTONS limit
 
 //
 // P_InitSwitchList
@@ -99,6 +109,19 @@ button_t        buttonlist[MAXBUTTONS];
 void P_InitSwitchList(void)
 {
     int i, slindex, episode;
+
+    // [crispy] add support for SWITCHES lumps
+    switchlist_t *alphSwitchList;
+    boolean from_lump;
+
+    if ((from_lump = (W_CheckNumForName("SWITCHES") != -1)))
+    {
+	alphSwitchList = W_CacheLumpName("SWITCHES", PU_STATIC);
+    }
+    else
+    {
+	alphSwitchList = alphSwitchList_vanilla;
+    }
 
     // Note that this is called "episode" here but it's actually something
     // quite different. As we progress from Shareware->Registered->Doom II
@@ -119,19 +142,47 @@ void P_InitSwitchList(void)
 
     slindex = 0;
 
-    for (i = 0; i < arrlen(alphSwitchList); i++)
+    for (i = 0; alphSwitchList[i].episode; i++)
     {
-	if (alphSwitchList[i].episode <= episode)
+	const short alphSwitchList_episode = from_lump ?
+	    SHORT(alphSwitchList[i].episode) :
+	    alphSwitchList[i].episode;
+
+	// [crispy] remove MAXSWITCHES limit
+	if (slindex + 1 >= maxswitches)
+	{
+	    size_t newmax = maxswitches ? 2 * maxswitches : MAXSWITCHES;
+	    switchlist = I_Realloc(switchlist, newmax * sizeof(*switchlist));
+	    maxswitches = newmax;
+	}
+
+	if (alphSwitchList_episode <= episode)
 	{
 	    switchlist[slindex++] =
                 R_TextureNumForName(DEH_String(alphSwitchList[i].name1));
 	    switchlist[slindex++] =
                 R_TextureNumForName(DEH_String(alphSwitchList[i].name2));
+
+	    // [crispy] if one texture is missing, disable the whole pair
+	    if (!switchlist[slindex - 2] || !switchlist[slindex - 1])
+	    {
+                switchlist[slindex - 2] = switchlist[slindex - 1] = -1;
+	    }
 	}
     }
 
     numswitches = slindex / 2;
     switchlist[slindex] = -1;
+
+    // [crispy] add support for SWITCHES lumps
+    if (from_lump)
+    {
+	W_ReleaseLumpName("SWITCHES");
+    }
+
+    // [crispy] pre-allocate some memory for the buttonlist[] array
+    buttonlist = I_Realloc(NULL, sizeof(*buttonlist) * (maxbuttons = MAXBUTTONS));
+    memset(buttonlist, 0, sizeof(*buttonlist) * maxbuttons);
 }
 
 
@@ -148,19 +199,23 @@ P_StartButton
     int		i;
     
     // See if button is already pressed
-    for (i = 0;i < MAXBUTTONS;i++)
+    for (i = 0;i < maxbuttons;i++)
     {
 	if (buttonlist[i].btimer
 	    && buttonlist[i].line == line)
 	{
 	    
+	  // [crispy] register up to three buttons at once for lines with more than one switch texture
+	  if (buttonlist[i].where == w)
+	  {
 	    return;
+	  }
 	}
     }
     
 
     
-    for (i = 0;i < MAXBUTTONS;i++)
+    for (i = 0;i < maxbuttons;i++)
     {
 	if (!buttonlist[i].btimer)
 	{
@@ -168,11 +223,19 @@ P_StartButton
 	    buttonlist[i].where = w;
 	    buttonlist[i].btexture = texture;
 	    buttonlist[i].btimer = time;
-	    buttonlist[i].soundorg = &line->frontsector->soundorg;
+	    buttonlist[i].soundorg = crispy->soundfix ? &line->soundorg : &line->frontsector->soundorg; // [crispy] corrected sound source
 	    return;
 	}
     }
     
+    // [crispy] remove MAXBUTTONS limit
+    {
+	maxbuttons = 2 * maxbuttons;
+	buttonlist = I_Realloc(buttonlist, sizeof(*buttonlist) * maxbuttons);
+	memset(buttonlist + maxbuttons/2, 0, sizeof(*buttonlist) * maxbuttons/2);
+	return P_StartButton(line, w, texture, time);
+    }
+
     I_Error("P_StartButton: no button slots left!");
 }
 
@@ -194,6 +257,7 @@ P_ChangeSwitchTexture
     int     texBot;
     int     i;
     int     sound;
+    boolean playsound = false;
 	
     if (!useAgain)
 	line->special = 0;
@@ -212,40 +276,51 @@ P_ChangeSwitchTexture
     {
 	if (switchlist[i] == texTop)
 	{
-	    S_StartSound(buttonlist->soundorg,sound);
+//	    S_StartSound(buttonlist->soundorg,sound);
+	    playsound = true;
 	    sides[line->sidenum[0]].toptexture = switchlist[i^1];
 
 	    if (useAgain)
 		P_StartButton(line,top,switchlist[i],BUTTONTIME);
 
-	    return;
+//	    return;
 	}
-	else
+	// [crispy] register up to three buttons at once for lines with more than one switch texture
+//	else
 	{
 	    if (switchlist[i] == texMid)
 	    {
-		S_StartSound(buttonlist->soundorg,sound);
+//		S_StartSound(buttonlist->soundorg,sound);
+		playsound = true;
 		sides[line->sidenum[0]].midtexture = switchlist[i^1];
 
 		if (useAgain)
 		    P_StartButton(line, middle,switchlist[i],BUTTONTIME);
 
-		return;
+//		return;
 	    }
-	    else
+	    // [crispy] register up to three buttons at once for lines with more than one switch texture
+//	    else
 	    {
 		if (switchlist[i] == texBot)
 		{
-		    S_StartSound(buttonlist->soundorg,sound);
+//		    S_StartSound(buttonlist->soundorg,sound);
+		    playsound = true;
 		    sides[line->sidenum[0]].bottomtexture = switchlist[i^1];
 
 		    if (useAgain)
 			P_StartButton(line, bottom,switchlist[i],BUTTONTIME);
 
-		    return;
+//		    return;
 		}
 	    }
 	}
+    }
+
+    // [crispy] corrected sound source
+    if (playsound)
+    {
+	S_StartSound(crispy->soundfix ? &line->soundorg : buttonlist->soundorg,sound);
     }
 }
 

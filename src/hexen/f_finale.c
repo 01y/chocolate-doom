@@ -170,8 +170,8 @@ static void TextWrite(void)
     int cx, cy;
     patch_t *w;
 
-    memcpy(I_VideoBuffer, W_CacheLumpNum(FinaleLumpNum, PU_CACHE),
-           SCREENWIDTH * SCREENHEIGHT);
+    V_CopyScaledBuffer(I_VideoBuffer, W_CacheLumpNum(FinaleLumpNum, PU_CACHE),
+           ORIGWIDTH * ORIGHEIGHT);
     if (FinaleStage == 5)
     {                           // Chess pic, draw the correct character graphic
         if (netgame)
@@ -311,8 +311,8 @@ static void FadePic(void)
 
 static void DrawPic(void)
 {
-    memcpy(I_VideoBuffer, W_CacheLumpNum(FinaleLumpNum, PU_CACHE),
-           SCREENWIDTH * SCREENHEIGHT);
+    V_CopyScaledBuffer(I_VideoBuffer, W_CacheLumpNum(FinaleLumpNum, PU_CACHE),
+           ORIGWIDTH * ORIGHEIGHT);
     if (FinaleStage == 4 || FinaleStage == 5)
     {                           // Chess pic, draw the correct character graphic
         if (netgame)
@@ -366,10 +366,10 @@ void F_Drawer(void)
 
 static char *GetFinaleText(int sequence)
 {
-    char *msgLumpName;
+    const char *msgLumpName;
     int msgSize;
     int msgLump;
-    static char *winMsgLumpNames[] = {
+    static const char *winMsgLumpNames[] = {
         "win1msg",
         "win2msg",
         "win3msg"

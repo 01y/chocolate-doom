@@ -1,20 +1,21 @@
-AC_INIT(Chocolate Doom, 3.0.0,
-        chocolate-doom-dev-list@chocolate-doom.org, chocolate-doom)
+AC_INIT(Crispy Doom, 5.6.2,
+        fabian@greffrath.com, crispy-doom)
 
 PACKAGE_SHORTNAME=${PACKAGE_NAME% Doom}
-PACKAGE_SHORTDESC="Conservative source port"
+PACKAGE_SHORTDESC="Limit-removing enhanced-resolution Doom source port"
 PACKAGE_COPYRIGHT="Copyright (C) 1993-2018"
 PACKAGE_LICENSE="GNU General Public License, version 2"
-PACKAGE_MAINTAINER="Simon Howard"
-PACKAGE_URL="https://www.chocolate-doom.org/"
-PACKAGE_RDNS="org.chocolate_doom"
-PACKAGE_ISSUES="https://github.com/chocolate-doom/chocolate-doom/issues"
+PACKAGE_MAINTAINER="Fabian Greffrath"
+PACKAGE_URL="http://fabiangreffrath.github.io/crispy-doom"
+PACKAGE_RDNS="io.github.fabiangreffrath"
+PACKAGE_ISSUES="https://github.com/fabiangreffrath/crispy-doom/issues"
 
 AC_CONFIG_AUX_DIR(autotools)
 AC_CANONICAL_HOST
 
 orig_CFLAGS="$CFLAGS"
 
+AM_PROG_AR
 AC_PROG_CC
 AC_PROG_RANLIB
 AC_CHECK_PROG(HAVE_PYTHON, python, true, false)
@@ -33,6 +34,24 @@ fi
 PKG_CHECK_MODULES(SDL, [sdl2 >= 2.0.1])
 PKG_CHECK_MODULES(SDLMIXER, [SDL2_mixer >= 2.0.0])
 PKG_CHECK_MODULES(SDLNET, [SDL2_net >= 2.0.0])
+
+# [Crispy] Check for zlib.
+AC_ARG_WITH([zlib],
+AS_HELP_STRING([--without-zlib],
+    [Build without zlib @<:@default=check@:>@]),
+[],
+[
+    [with_zlib=check]
+])
+AS_IF([test "x$with_zlib" != xno], [
+    PKG_CHECK_MODULES(LIBZ, zlib, [
+        AC_DEFINE([HAVE_LIBZ], [1], [zlib installed])
+    ], [
+        AS_IF([test "x$with_zlib" != xcheck], [AC_MSG_FAILURE(
+            [--with-zlib was given, but test for zlib failed])
+        ])
+    ])
+])
 
 # Check for libsamplerate.
 AC_ARG_WITH([libsamplerate],
@@ -61,7 +80,7 @@ AS_HELP_STRING([--without-libpng],
     [with_libpng=check]
 ])
 AS_IF([test "x$with_libpng" != xno], [
-    PKG_CHECK_MODULES(PNG, libpng >= 1.6.10, [
+    PKG_CHECK_MODULES(PNG, libpng >= 1.2.50, [
         AC_DEFINE([HAVE_LIBPNG], [1], [libpng installed])
     ], [
         AS_IF([test "x$with_libpng" != xcheck], [AC_MSG_FAILURE(
@@ -70,13 +89,23 @@ AS_IF([test "x$with_libpng" != xno], [
     ])
 ])
 
+# [crispy] true-color rendering as a compile-time option
+AC_ARG_ENABLE([truecolor],
+AS_HELP_STRING([--enable-truecolor],
+    [true-color rendering (experimental) @<:@default=no@:>@]),
+AC_DEFINE([CRISPY_TRUECOLOR], [1], [true-color rendering])
+)
+
 # TODO: We currently link everything against libraries that don't need it.
 # Use the specific library CFLAGS/LIBS variables instead of setting them here.
-CFLAGS="$CFLAGS $SDL_CFLAGS ${SAMPLERATE_CFLAGS:-} ${PNG_CFLAGS:-}"
-LDFLAGS="$LDFLAGS $SDL_LIBS ${SAMPLERATE_LIBS:-} ${PNG_LIBS:-}"
+CFLAGS="$CFLAGS $SDL_CFLAGS ${SAMPLERATE_CFLAGS:-} ${PNG_CFLAGS:-} ${LIBZ_CFLAGS:-}"
+LDFLAGS="$LDFLAGS $SDL_LIBS ${SAMPLERATE_LIBS:-} ${PNG_LIBS:-} ${LIBZ_LIBS:-}"
 AC_CHECK_LIB(m, log)
 
-AC_CHECK_HEADERS([linux/kd.h dev/isa/spkrio.h dev/speaker/speaker.h])
+# [crispy] use stdlib's qsort() function for sorting the vissprites[] array
+AC_CHECK_FUNCS(qsort)
+
+AC_CHECK_HEADERS([dirent.h linux/kd.h dev/isa/spkrio.h dev/speaker/speaker.h])
 AC_CHECK_FUNCS(mmap ioperm)
 AC_CHECK_DECLS([strcasecmp, strncasecmp], [], [], [[#include <strings.h>]])
 
@@ -85,13 +114,6 @@ AC_CHECK_DECLS([strcasecmp, strncasecmp], [], [], [[#include <strings.h>]])
 
 AC_CHECK_LIB(i386, i386_iopl)
 AC_CHECK_LIB(amd64, amd64_iopl)
-
-AC_ARG_WITH([bashcompletiondir],
-    AS_HELP_STRING([--with-bashcompletiondir=DIR], [Bash completion directory]),
-    [],
-    [AS_IF([$($PKG_CONFIG --exists bash-completion 2> /dev/null)],
-        [bashcompletiondir=$($PKG_CONFIG --variable=completionsdir bash-completion)],
-	[bashcompletiondir=${datadir}/bash-completion/completions])])
 
 case "$host" in
   *-*-mingw* | *-*-cygwin* | *-*-msvc* )
@@ -152,8 +174,6 @@ AC_SUBST(PACKAGE_URL)
 AC_SUBST(PACKAGE_RDNS)
 AC_SUBST(PACKAGE_ISSUES)
 
-AC_SUBST(bashcompletiondir)
-
 dnl Shut up the datarootdir warnings.
 AC_DEFUN([AC_DATAROOTDIR_CHECKED])
 
@@ -175,23 +195,23 @@ pkg/osx/Info.plist
 rpm.spec
 data/Makefile
 src/Makefile
-src/doom.appdata.xml
-src/doom.desktop
-src/doom-screensaver.desktop
+src/Doom.metainfo.xml
+src/Doom.desktop
+src/Doom_Screensaver.desktop
 src/doom/Makefile
-src/heretic.appdata.xml
-src/heretic.desktop
+src/Heretic.metainfo.xml
+src/Heretic.desktop
 src/heretic/Makefile
-src/hexen.appdata.xml
-src/hexen.desktop
+src/Hexen.metainfo.xml
+src/Hexen.desktop
 src/hexen/Makefile
 src/resource.rc
 src/setup-res.rc
 src/setup/Makefile
-src/setup/setup.desktop
+src/setup/Setup.desktop
 src/setup/setup-manifest.xml
-src/strife.appdata.xml
-src/strife.desktop
+src/Strife.metainfo.xml
+src/Strife.desktop
 src/strife/Makefile
 textscreen/Makefile
 textscreen/examples/Makefile

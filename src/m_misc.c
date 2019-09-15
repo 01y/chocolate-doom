@@ -178,7 +178,7 @@ long M_FileLength(FILE *handle)
 // M_WriteFile
 //
 
-boolean M_WriteFile(const char *name, void *source, int length)
+boolean M_WriteFile(const char *name, const void *source, int length)
 {
     FILE *handle;
     int	count;
@@ -267,6 +267,45 @@ boolean M_StrToInt(const char *str, int *result)
         || sscanf(str, " 0X%x", result) == 1
         || sscanf(str, " 0%o", result) == 1
         || sscanf(str, " %d", result) == 1;
+}
+
+// Returns the directory portion of the given path, without the trailing
+// slash separator character. If no directory is described in the path,
+// the string "." is returned. In either case, the result is newly allocated
+// and must be freed by the caller after use.
+char *M_DirName(const char *path)
+{
+    char *p, *result;
+
+    p = strrchr(path, DIR_SEPARATOR);
+    if (p == NULL)
+    {
+        return M_StringDuplicate(".");
+    }
+    else
+    {
+        result = M_StringDuplicate(path);
+        result[p - path] = '\0';
+        return result;
+    }
+}
+
+// Returns the base filename described by the given path (without the
+// directory name). The result points inside path and nothing new is
+// allocated.
+const char *M_BaseName(const char *path)
+{
+    const char *p;
+
+    p = strrchr(path, DIR_SEPARATOR);
+    if (p == NULL)
+    {
+        return path;
+    }
+    else
+    {
+        return p + 1;
+    }
 }
 
 void M_ExtractFileBase(const char *path, char *dest)
@@ -500,7 +539,7 @@ boolean M_StringConcat(char *dest, const char *src, size_t dest_size)
 
 boolean M_StringStartsWith(const char *s, const char *prefix)
 {
-    return strlen(s) > strlen(prefix)
+    return strlen(s) >= strlen(prefix)
         && strncmp(s, prefix, strlen(prefix)) == 0;
 }
 

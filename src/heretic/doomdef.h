@@ -473,7 +473,7 @@ typedef struct player_s
 #define	CF_GODMODE		2
 #define	CF_NOMOMENTUM	4       // not really a cheat, just a debug aid
 
-#define	SBARHEIGHT	42      // status bar height at bottom of screen
+#define	SBARHEIGHT	(42 << crispy->hires)      // status bar height at bottom of screen
 
 
 /*
@@ -547,12 +547,13 @@ extern int leveltime;           // tics in game play for par
 
 extern ticcmd_t *netcmds;
 
-#define SAVEGAMESIZE 0x30000
+#define SAVEGAMESIZE 0x30000*16
 #define SAVESTRINGSIZE 24
 
 extern mapthing_t *deathmatch_p;
 extern mapthing_t deathmatchstarts[10];
 extern mapthing_t playerstarts[MAXPLAYERS];
+extern boolean playerstartsingame[MAXPLAYERS];
 
 extern int mouseSensitivity;
 

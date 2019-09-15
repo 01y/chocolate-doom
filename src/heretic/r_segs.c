@@ -25,6 +25,7 @@
 #include <stdlib.h>
 
 #include "doomdef.h"
+#include "i_system.h" // [crispy] I_Realloc()
 #include "r_local.h"
 
 // OPTIMIZE: closed two sided lines as single sided
@@ -63,7 +64,7 @@ fixed_t bottomfrac, bottomstep;
 
 lighttable_t **walllights;
 
-short *maskedtexturecol;
+int *maskedtexturecol;  // [crispy] 32-bit integer math
 
 /*
 ================
@@ -133,11 +134,11 @@ void R_RenderMaskedSegRange(drawseg_t * ds, int x1, int x2)
     for (dc_x = x1; dc_x <= x2; dc_x++)
     {
         // calculate lighting
-        if (maskedtexturecol[dc_x] != SHRT_MAX)
+        if (maskedtexturecol[dc_x] != INT_MAX) // [crispy] 32-bit integer math
         {
             if (!fixedcolormap)
             {
-                index = spryscale >> LIGHTSCALESHIFT;
+                index = spryscale >> (LIGHTSCALESHIFT + crispy->hires);
                 if (index >= MAXLIGHTSCALE)
                     index = MAXLIGHTSCALE - 1;
                 dc_colormap = walllights[index];
@@ -154,7 +155,7 @@ void R_RenderMaskedSegRange(drawseg_t * ds, int x1, int x2)
                                             maskedtexturecol[dc_x]) - 3);
 
             R_DrawMaskedColumn(col, -1);
-            maskedtexturecol[dc_x] = SHRT_MAX;
+            maskedtexturecol[dc_x] = INT_MAX; // [crispy] 32-bit integer math
         }
         spryscale += rw_scalestep;
     }
@@ -234,7 +235,7 @@ void R_RenderSegLoop(void)
                 rw_offset - FixedMul(finetangent[angle], rw_distance);
             texturecolumn >>= FRACBITS;
             // calculate lighting
-            index = rw_scale >> LIGHTSCALESHIFT;
+            index = rw_scale >> (LIGHTSCALESHIFT + crispy->hires);
             if (index >= MAXLIGHTSCALE)
                 index = MAXLIGHTSCALE - 1;
             dc_colormap = walllights[index];
@@ -251,6 +252,7 @@ void R_RenderSegLoop(void)
             dc_yh = yh;
             dc_texturemid = rw_midtexturemid;
             dc_source = R_GetColumn(midtexture, texturecolumn);
+            dc_texheight = textureheight[midtexture]>>FRACBITS;
             colfunc();
             ceilingclip[rw_x] = viewheight;
             floorclip[rw_x] = -1;
@@ -269,6 +271,7 @@ void R_RenderSegLoop(void)
                     dc_yh = mid;
                     dc_texturemid = rw_toptexturemid;
                     dc_source = R_GetColumn(toptexture, texturecolumn);
+                    dc_texheight = textureheight[toptexture]>>FRACBITS;
                     colfunc();
                     ceilingclip[rw_x] = mid;
                 }
@@ -293,6 +296,7 @@ void R_RenderSegLoop(void)
                     dc_yh = yh;
                     dc_texturemid = rw_bottomtexturemid;
                     dc_source = R_GetColumn(bottomtexture, texturecolumn);
+                    dc_texheight = textureheight[bottomtexture]>>FRACBITS;
                     colfunc();
                     floorclip[rw_x] = mid;
                 }
@@ -338,8 +342,20 @@ void R_StoreWallRange(int start, int stop)
     fixed_t vtop;
     int lightnum;
 
-    if (ds_p == &drawsegs[MAXDRAWSEGS])
-        return;                 // don't overflow and crash
+    // [crispy] remove MAXDRAWSEGS limit
+    if (ds_p == &drawsegs[numdrawsegs])
+    {
+	int numdrawsegs_old = numdrawsegs;
+
+	numdrawsegs = numdrawsegs ? 2 * numdrawsegs : MAXDRAWSEGS;
+	drawsegs = I_Realloc(drawsegs, numdrawsegs * sizeof(*drawsegs));
+	memset(drawsegs + numdrawsegs_old, 0, (numdrawsegs - numdrawsegs_old) * sizeof(*drawsegs));
+
+	ds_p = drawsegs + numdrawsegs_old;
+
+	if (numdrawsegs_old)
+	    fprintf(stderr, "R_StoreWallRange: Hit MAXDRAWSEGS limit at %d, raised to %d.\n", numdrawsegs_old, numdrawsegs);
+    }
 
 #ifdef RANGECHECK
     if (start >= viewwidth || start > stop)
@@ -636,14 +652,14 @@ void R_StoreWallRange(int start, int stop)
 //
     if (((ds_p->silhouette & SIL_TOP) || maskedtexture) && !ds_p->sprtopclip)
     {
-        memcpy(lastopening, ceilingclip + start, 2 * (rw_stopx - start));
+        memcpy(lastopening, ceilingclip + start, sizeof(lastopening) * (rw_stopx - start)); // [crispy] 32-bit integer math
         ds_p->sprtopclip = lastopening - start;
         lastopening += rw_stopx - start;
     }
     if (((ds_p->silhouette & SIL_BOTTOM) || maskedtexture)
         && !ds_p->sprbottomclip)
     {
-        memcpy(lastopening, floorclip + start, 2 * (rw_stopx - start));
+        memcpy(lastopening, floorclip + start, sizeof(lastopening) * (rw_stopx - start)); // [crispy] 32-bit integer math
         ds_p->sprbottomclip = lastopening - start;
         lastopening += rw_stopx - start;
     }

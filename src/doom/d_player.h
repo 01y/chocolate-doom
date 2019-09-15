@@ -67,7 +67,9 @@ typedef enum
     // No damage, no health loss.
     CF_GODMODE		= 2,
     // Not really a cheat, just a debug aid.
-    CF_NOMOMENTUM	= 4
+    CF_NOMOMENTUM	= 4,
+    // [crispy] monsters don't target
+    CF_NOTARGET         = 8
 
 } cheat_t;
 
@@ -100,8 +102,9 @@ typedef struct player_s
     int			armortype;	
 
     // Power ups. invinc and invis are tic counters.
-    int			powers[NUMPOWERS];
+    int			powers[NUMPOWERS + 3]; // [crispy] showfps and mapcoords are now "powers"
     boolean		cards[NUMCARDS];
+    boolean		tryopen[NUMCARDS]; // [crispy] blinking key or skull in the status bar
     boolean		backpack;
     
     // Frags, kills of other players.
@@ -158,6 +161,19 @@ typedef struct player_s
     // True if secret level has been done.
     boolean		didsecret;	
 
+    // [AM] Previous position of viewz before think.
+    //      Used to interpolate between camera positions.
+    angle_t		oldviewz;
+
+    // [crispy] additional fields for crispy features
+    char*	centermessage;
+    int	lookdir, oldlookdir;
+    boolean	centering;
+    unsigned int	jumpTics;
+    fixed_t	recoilpitch, oldrecoilpitch;
+    mobj_t	*so;
+    // [crispy] squat down weapon sprite a bit after hitting the ground
+    fixed_t	psp_dy, psp_dy_max;
 } player_t;
 
 
@@ -203,6 +219,8 @@ typedef struct
 
     wbplayerstruct_t	plyr[MAXPLAYERS];
 
+    // [crispy] CPhipps - total game time for completed levels so far
+    int		totaltimes;
 } wbstartstruct_t;
 
 

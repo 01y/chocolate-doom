@@ -62,6 +62,13 @@ P_CrossSpecialLine
   int		side,
   mobj_t*	thing );
 
+// [crispy] more MBF code pointers
+void
+P_CrossSpecialLinePtr
+( line_t*	line,
+  int		side,
+  mobj_t*	thing );
+
 void    P_PlayerInSpecialSector (player_t* player);
 
 int
@@ -203,13 +210,14 @@ void    P_SpawnGlowingLight(sector_t* sector);
 //
 // P_SWITCH
 //
-typedef struct
+// [crispy] add PACKEDATTR for reading SWITCHES lumps from memory
+typedef PACKED_STRUCT (
 {
     char	name1[9];
     char	name2[9];
     short	episode;
     
-} switchlist_t;
+}) switchlist_t;
 
 
 typedef enum
@@ -243,7 +251,8 @@ typedef struct
  // 1 second, in ticks. 
 #define BUTTONTIME      35             
 
-extern button_t	buttonlist[MAXBUTTONS]; 
+extern button_t	*buttonlist;
+extern int maxbuttons;
 
 void
 P_ChangeSwitchTexture
@@ -300,7 +309,7 @@ typedef struct
 
 #define PLATWAIT		3
 #define PLATSPEED		FRACUNIT
-#define MAXPLATS		30
+#define MAXPLATS		30*256
 
 
 extern plat_t*	activeplats[MAXPLATS];

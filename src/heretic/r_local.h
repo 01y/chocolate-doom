@@ -25,8 +25,8 @@
 
 #define	BASEYCENTER			100
 
-#define MAXWIDTH			1120
-#define	MAXHEIGHT			832
+//#define MAXWIDTH			1120
+//#define	MAXHEIGHT			832
 
 #define	PI					3.141592657
 
@@ -61,6 +61,14 @@
 typedef struct
 {
     fixed_t x, y;
+
+// [crispy] remove slime trails
+// vertex coordinates *only* used in rendering that have been
+// moved towards the linedef associated with their seg by projecting them
+// using the law of cosines in p_setup.c:P_RemoveSlimeTrails();
+    fixed_t	r_x;
+    fixed_t	r_y;
+    boolean	moved;
 } vertex_t;
 
 struct line_s;
@@ -148,7 +156,7 @@ typedef struct
 typedef byte lighttable_t;      // this could be wider for >8 bit display
 
 #define	MAXVISPLANES	128
-#define	MAXOPENINGS		SCREENWIDTH*64
+#define	MAXOPENINGS		MAXWIDTH*64*4
 
 typedef struct
 {
@@ -157,12 +165,12 @@ typedef struct
     int lightlevel;
     int special;
     int minx, maxx;
-    byte pad1;                  // leave pads for [minx-1]/[maxx+1]
-    byte top[SCREENWIDTH];
-    byte pad2;
-    byte pad3;
-    byte bottom[SCREENWIDTH];
-    byte pad4;
+    unsigned int pad1;                    // [crispy] hires / 32-bit integer math
+    unsigned int top[MAXWIDTH];        // [crispy] hires / 32-bit integer math
+    unsigned int pad2;                    // [crispy] hires / 32-bit integer math
+    unsigned int pad3;                    // [crispy] hires / 32-bit integer math
+    unsigned int bottom[MAXWIDTH];     // [crispy] hires / 32-bit integer math
+    unsigned int pad4;                    // [crispy] hires / 32-bit integer math
 } visplane_t;
 
 typedef struct drawseg_s
@@ -174,9 +182,9 @@ typedef struct drawseg_s
     fixed_t bsilheight;         // don't clip sprites above this
     fixed_t tsilheight;         // don't clip sprites below this
 // pointers to lists for sprite clipping
-    short *sprtopclip;          // adjusted so [x1] is first value
-    short *sprbottomclip;       // adjusted so [x1] is first value
-    short *maskedtexturecol;    // adjusted so [x1] is first value
+    int *sprtopclip;            // [crispy] 32-bit integer math
+    int *sprbottomclip;         // [crispy] 32-bit integer math
+    int *maskedtexturecol;      // [crispy] 32-bit integer math
 } drawseg_t;
 
 #define	SIL_NONE	0
@@ -264,7 +272,7 @@ extern player_t *viewplayer;
 extern angle_t clipangle;
 
 extern int viewangletox[FINEANGLES / 2];
-extern angle_t xtoviewangle[SCREENWIDTH + 1];
+extern angle_t xtoviewangle[MAXWIDTH + 1];
 
 extern fixed_t rw_distance;
 extern angle_t rw_normalangle;
@@ -325,7 +333,8 @@ extern boolean markfloor;       // false if the back side is the same plane
 extern boolean markceiling;
 extern boolean skymap;
 
-extern drawseg_t drawsegs[MAXDRAWSEGS], *ds_p;
+extern drawseg_t *drawsegs, *ds_p;
+extern int numdrawsegs;
 
 extern lighttable_t **hscalelight, **vscalelight, **dscalelight;
 
@@ -352,18 +361,18 @@ extern planefunction_t floorfunc, ceilingfunc;
 
 extern int skyflatnum;
 
-extern short openings[MAXOPENINGS], *lastopening;
+extern int *lastopening;    // [crispy] 32-bit integer math
 
-extern short floorclip[SCREENWIDTH];
-extern short ceilingclip[SCREENWIDTH];
+extern int floorclip[MAXWIDTH];   // [crispy] 32-bit integer math
+extern int ceilingclip[MAXWIDTH]; // [crispy] 32-bit integer math
 
-extern fixed_t yslope[SCREENHEIGHT];
-extern fixed_t distscale[SCREENWIDTH];
+extern fixed_t yslope[MAXHEIGHT];
+extern fixed_t distscale[MAXWIDTH];
 
 void R_InitPlanes(void);
 void R_ClearPlanes(void);
 void R_MapPlane(int y, int x1, int x2);
-void R_MakeSpans(int x, int t1, int b1, int t2, int b2);
+void R_MakeSpans(int x, unsigned int t1, unsigned int b1, unsigned int t2, unsigned int b2); // [crispy] 32-bit integer math
 void R_DrawPlanes(void);
 
 visplane_t *R_FindPlane(fixed_t height, int picnum, int lightlevel,
@@ -402,16 +411,16 @@ void R_PrecacheLevel(void);
 //
 #define	MAXVISSPRITES	128
 
-extern vissprite_t vissprites[MAXVISSPRITES], *vissprite_p;
+extern vissprite_t *vissprites, *vissprite_p;
 extern vissprite_t vsprsortedhead;
 
 // constant arrays used for psprite clipping and initializing clipping
-extern short negonearray[SCREENWIDTH];
-extern short screenheightarray[SCREENWIDTH];
+extern int negonearray[MAXWIDTH];       // [crispy] 32-bit integer math
+extern int screenheightarray[MAXWIDTH]; // [crispy] 32-bit integer math
 
 // vars for R_DrawMaskedColumn
-extern short *mfloorclip;
-extern short *mceilingclip;
+extern int *mfloorclip;   // [crispy] 32-bit integer math
+extern int *mceilingclip; // [crispy] 32-bit integer math
 extern fixed_t spryscale;
 extern fixed_t sprtopscreen;
 extern fixed_t sprbotscreen;
@@ -427,7 +436,7 @@ void R_SortVisSprites(void);
 void R_AddSprites(sector_t * sec);
 void R_AddPSprites(void);
 void R_DrawSprites(void);
-void R_InitSprites(char **namelist);
+void R_InitSprites(const char **namelist);
 void R_ClearSprites(void);
 void R_DrawMasked(void);
 void R_ClipVisSprite(vissprite_t * vis, int xl, int xh);
@@ -444,6 +453,7 @@ extern int dc_yl;
 extern int dc_yh;
 extern fixed_t dc_iscale;
 extern fixed_t dc_texturemid;
+extern int dc_texheight;
 extern byte *dc_source;         // first pixel in a column
 
 void R_DrawColumn(void);

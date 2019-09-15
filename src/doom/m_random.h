@@ -31,10 +31,14 @@ int M_Random (void);
 // As M_Random, but used only by the play simulation.
 int P_Random (void);
 
+// [crispy] our own private random function
+int Crispy_Random (void);
+
 // Fix randoms for demos.
 void M_ClearRandom (void);
 
 // Defined version of P_Random() - P_Random()
 int P_SubRandom (void);
+int Crispy_SubRandom (void);
 
 #endif

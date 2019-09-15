@@ -181,7 +181,7 @@ static void LaunchDoom(void *unused1, void *unused2)
 
 static txt_button_t *GetLaunchButton(void)
 {
-    char *label;
+    const char *label;
 
     switch (gamemission)
     {
@@ -226,7 +226,7 @@ void MainMenu(void)
                        (TxtWidgetSignalFunc) ConfigMouse, NULL),
         TXT_NewButton2("Configure Gamepad/Joystick",
                        (TxtWidgetSignalFunc) ConfigJoystick, NULL),
-        TXT_NewButton2("Compatibility",
+        TXT_NewButton2(gamemission == doom ? "Crispness" : "Compatibility",
                        (TxtWidgetSignalFunc) CompatibilitySettings, NULL),
         GetLaunchButton(),
         TXT_NewStrut(0, 1),
@@ -262,6 +262,10 @@ static void InitConfig(void)
     SetPlayerNameDefault();
 
     M_LoadDefaults();
+
+    // Create and configure the music pack directory if it does not
+    // already exist.
+    M_SetMusicPackDir();
 }
 
 //
@@ -307,6 +311,15 @@ static void InitTextscreen(void)
         fprintf(stderr, "Failed to initialize GUI\n");
         exit(-1);
     }
+
+    // Set Romero's "funky blue" color:
+    // <https://doomwiki.org/wiki/Romero_Blue>
+    TXT_SetColor(TXT_COLOR_BLUE, 0x04, 0x14, 0x40);
+
+    // [crispy] Crispy colors for Crispy Setup
+    TXT_SetColor(TXT_COLOR_BRIGHT_GREEN, 249, 227, 0);  // 0xF9, 0xE3, 0x00
+    TXT_SetColor(TXT_COLOR_CYAN, 220, 153, 0);          // 0xDC, 0x99, 0x00
+    TXT_SetColor(TXT_COLOR_BRIGHT_CYAN, 76, 160, 223);  // 0x4C, 0xA0, 0xDF
 
     SetIcon();
     SetWindowTitle();

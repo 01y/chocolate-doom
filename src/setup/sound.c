@@ -22,6 +22,7 @@
 #include "m_config.h"
 #include "m_misc.h"
 
+#include "execute.h"
 #include "mode.h"
 #include "sound.h"
 
@@ -52,14 +53,17 @@ int snd_cachesize = 64 * 1024 * 1024;
 int snd_maxslicetime_ms = 28;
 char *snd_musiccmd = "";
 int snd_pitchshift = 0;
-char *snd_dmxoption = "";
+char *snd_dmxoption = "-opl3"; // [crispy] default to OPL3 emulation
 
 static int numChannels = 8;
 static int sfxVolume = 8;
 static int musicVolume = 8;
 static int voiceVolume = 15;
 static int show_talk = 0;
-static int use_libsamplerate = 0;
+// [crispy] values 3 and higher might reproduce DOOM.EXE more accurately,
+// but 1 is closer to "use_libsamplerate = 0" which is the default in Choco
+// and causes only a short delay at startup
+static int use_libsamplerate = 1;
 static float libsamplerate_scale = 0.65;
 
 static char *music_pack_path = NULL;
@@ -113,9 +117,18 @@ static txt_dropdown_list_t *OPLTypeSelector(void)
     return result;
 }
 
-void ConfigSound(void)
+static void OpenMusicPackDir(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(unused))
+{
+    if (!OpenFolder(music_pack_path))
+    {
+        TXT_MessageBox("Error", "Failed to open music pack directory.");
+    }
+}
+
+void ConfigSound(TXT_UNCAST_ARG(widget), void *user_data)
 {
     txt_window_t *window;
+    txt_window_action_t *music_action;
 
     // Build the window
 
@@ -125,6 +138,10 @@ void ConfigSound(void)
     TXT_SetColumnWidths(window, 40);
     TXT_SetWindowPosition(window, TXT_HORIZ_CENTER, TXT_VERT_TOP,
                                   TXT_SCREEN_W / 2, 3);
+
+    music_action = TXT_NewWindowAction('m', "Music Packs");
+    TXT_SetWindowAction(window, TXT_HORIZ_CENTER, music_action);
+    TXT_SignalConnect(music_action, "pressed", OpenMusicPackDir, NULL);
 
     TXT_AddWidgets(window,
         TXT_NewSeparator("Sound effects"),
@@ -172,7 +189,7 @@ void ConfigSound(void)
                                     TXT_DIRECTORY),
                 NULL)),
 
-        TXT_NewRadioButton("Native MIDI", &snd_musicdevice, SNDDEVICE_GENMIDI),
+        TXT_NewRadioButton("MIDI/MP3/OGG/FLAC", &snd_musicdevice, SNDDEVICE_GENMIDI), // [crispy] improve ambigious music backend name
         TXT_NewConditional(&snd_musicdevice, SNDDEVICE_GENMIDI,
             TXT_MakeTable(2,
                 TXT_NewStrut(4, 0),
@@ -181,13 +198,6 @@ void ConfigSound(void)
                 TXT_NewFileSelector(&timidity_cfg_path, 34,
                                     "Select Timidity config file",
                                     cfg_extension),
-                TXT_NewStrut(4, 0),
-                TXT_NewLabel("Digital music pack directory: "),
-                TXT_NewStrut(4, 0),
-                TXT_NewFileSelector(&music_pack_path, 34,
-                                    "Select directory containing music pack "
-                                    "config files",
-                                    TXT_DIRECTORY),
                 NULL)),
         NULL);
 }

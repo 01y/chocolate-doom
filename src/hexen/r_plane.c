@@ -56,23 +56,23 @@ short openings[MAXOPENINGS], *lastopening;
 // Clip values are the solid pixel bounding the range.
 // floorclip start out SCREENHEIGHT
 // ceilingclip starts out -1
-short floorclip[SCREENWIDTH];
-short ceilingclip[SCREENWIDTH];
+short floorclip[MAXWIDTH];
+short ceilingclip[MAXWIDTH];
 
 // spanstart holds the start of a plane span, initialized to 0
-int spanstart[SCREENHEIGHT];
-int spanstop[SCREENHEIGHT];
+int spanstart[MAXHEIGHT];
+int spanstop[MAXHEIGHT];
 
 // Texture mapping
 lighttable_t **planezlight;
 fixed_t planeheight;
-fixed_t yslope[SCREENHEIGHT];
-fixed_t distscale[SCREENWIDTH];
+fixed_t yslope[MAXHEIGHT];
+fixed_t distscale[MAXWIDTH];
 fixed_t basexscale, baseyscale;
-fixed_t cachedheight[SCREENHEIGHT];
-fixed_t cacheddistance[SCREENHEIGHT];
-fixed_t cachedxstep[SCREENHEIGHT];
-fixed_t cachedystep[SCREENHEIGHT];
+fixed_t cachedheight[MAXHEIGHT];
+fixed_t cacheddistance[MAXHEIGHT];
+fixed_t cachedxstep[MAXHEIGHT];
+fixed_t cachedystep[MAXHEIGHT];
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
@@ -303,7 +303,7 @@ visplane_t *R_CheckPlane(visplane_t * pl, int start, int stop)
 
     for (x = intrl; x <= intrh; x++)
     {
-        if (pl->top[x] != 0xff)
+        if (pl->top[x] != 0xffff)
         {
             break;
         }
@@ -383,6 +383,8 @@ void R_DrawPlanes(void)
     int offset2;
     int skyTexture2;
     int scrollOffset;
+    int frac;
+    int fracstep = FRACUNIT >> crispy->hires;
 
     extern byte *ylookup[MAXHEIGHT];
     extern int columnofs[MAXWIDTH];
@@ -432,22 +434,21 @@ void R_DrawPlanes(void)
                         }
                         angle = (viewangle + xtoviewangle[x])
                             >> ANGLETOSKYSHIFT;
-                        source = R_GetColumn(skyTexture, angle + offset)
-                            + SKYTEXTUREMIDSHIFTED + (dc_yl - centery);
-                        source2 = R_GetColumn(skyTexture2, angle + offset2)
-                            + SKYTEXTUREMIDSHIFTED + (dc_yl - centery);
+                        source = R_GetColumn(skyTexture, angle + offset);
+                        source2 = R_GetColumn(skyTexture2, angle + offset2);
                         dest = ylookup[dc_yl] + columnofs[x];
+                        frac = SKYTEXTUREMIDSHIFTED * FRACUNIT + (dc_yl - centery) * fracstep;
                         do
                         {
-                            if (*source)
+                            if (source[frac >> FRACBITS])
                             {
-                                *dest = *source++;
-                                source2++;
+                                *dest = source[frac >> FRACBITS];
+                                frac += fracstep;
                             }
                             else
                             {
-                                *dest = *source2++;
-                                source++;
+                                *dest = source2[frac >> FRACBITS];
+                                frac += fracstep;
                             }
                             dest += SCREENWIDTH;
                         }
@@ -481,13 +482,14 @@ void R_DrawPlanes(void)
                         }
                         angle = (viewangle + xtoviewangle[x])
                             >> ANGLETOSKYSHIFT;
-                        source = R_GetColumn(skyTexture, angle + offset)
-                            + SKYTEXTUREMIDSHIFTED + (dc_yl - centery);
+                        source = R_GetColumn(skyTexture, angle + offset);
                         dest = ylookup[dc_yl] + columnofs[x];
+                        frac = SKYTEXTUREMIDSHIFTED * FRACUNIT + (dc_yl - centery) * fracstep;
                         do
                         {
-                            *dest = *source++;
+                            *dest = source[frac >> FRACBITS];
                             dest += SCREENWIDTH;
+                            frac += fracstep;
                         }
                         while (count--);
                     }
@@ -569,8 +571,8 @@ void R_DrawPlanes(void)
         }
         planezlight = zlight[light];
 
-        pl->top[pl->maxx + 1] = 0xff;
-        pl->top[pl->minx - 1] = 0xff;
+        pl->top[pl->maxx + 1] = 0xffff;
+        pl->top[pl->minx - 1] = 0xffff;
 
         stop = pl->maxx + 1;
         for (x = pl->minx; x <= stop; x++)

@@ -34,7 +34,10 @@ static int always_run = 0;
 // Keys within these groups cannot have the same value.
 
 static int *controls[] = { &key_left, &key_right, &key_up, &key_down,
+                           &key_alt_up, &key_alt_down,
+                           &key_reverse, &key_toggleautorun, &key_togglenovert,
                            &key_strafeleft, &key_straferight, &key_fire,
+                           &key_alt_strafeleft, &key_alt_straferight,
                            &key_use, &key_strafe, &key_speed, &key_jump,
                            &key_flyup, &key_flydown, &key_flycenter,
                            &key_lookup, &key_lookdown, &key_lookcenter,
@@ -53,14 +56,15 @@ static int *controls[] = { &key_left, &key_right, &key_up, &key_down,
 
 static int *menu_nav[] = { &key_menu_activate, &key_menu_up, &key_menu_down,
                            &key_menu_left, &key_menu_right, &key_menu_back,
-                           &key_menu_forward, NULL };
+                           &key_menu_forward, &key_menu_del, NULL };
 
 static int *shortcuts[] = { &key_menu_help, &key_menu_save, &key_menu_load,
                             &key_menu_volume, &key_menu_detail, &key_menu_qsave,
                             &key_menu_endgame, &key_menu_messages, &key_spy,
                             &key_menu_qload, &key_menu_quit, &key_menu_gamma,
+                            &key_menu_nextlevel, &key_menu_reloadlevel,
                             &key_menu_incscreen, &key_menu_decscreen, 
-                            &key_menu_screenshot,
+                            &key_menu_screenshot, &key_menu_cleanscreenshot,
                             &key_message_refresh, &key_multi_msg,
                             &key_multi_msgplayer[0], &key_multi_msgplayer[1],
                             &key_multi_msgplayer[2], &key_multi_msgplayer[3] };
@@ -69,6 +73,7 @@ static int *map_keys[] = { &key_map_north, &key_map_south, &key_map_east,
                            &key_map_west, &key_map_zoomin, &key_map_zoomout,
                            &key_map_toggle, &key_map_maxzoom, &key_map_follow,
                            &key_map_grid, &key_map_mark, &key_map_clearmark,
+                           &key_map_overlay, &key_map_rotate,
                            NULL };
 
 static void UpdateJoybSpeed(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(var))
@@ -146,7 +151,7 @@ static void KeySetCallback(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(variable))
 
 // Add a label and keyboard input to the specified table.
 
-static void AddKeyControl(TXT_UNCAST_ARG(table), char *name, int *var)
+static void AddKeyControl(TXT_UNCAST_ARG(table), const char *name, int *var)
 {
     TXT_CAST_ARG(txt_table_t, table);
     txt_key_input_t *key_input;
@@ -158,7 +163,7 @@ static void AddKeyControl(TXT_UNCAST_ARG(table), char *name, int *var)
     TXT_SignalConnect(key_input, "set", KeySetCallback, var);
 }
 
-static void AddSectionLabel(TXT_UNCAST_ARG(table), char *title,
+static void AddSectionLabel(TXT_UNCAST_ARG(table), const char *title,
                             boolean add_space)
 {
     TXT_CAST_ARG(txt_table_t, table);
@@ -196,18 +201,39 @@ static void ConfigExtraKeys(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(unused))
 
     TXT_SetColumnWidths(table, 21, 9);
 
-    if (extra_keys)
+    if (extra_keys || 1) // Crispy
     {
         // When we have extra controls, a scrollable pane must be used.
 
         scrollpane = TXT_NewScrollPane(0, 13, table);
         TXT_AddWidget(window, scrollpane);
 
+
+        if (gamemission == doom)
+        {
+        AddSectionLabel(table, "View", false);
+
+        AddKeyControl(table, "Look up [*]", &key_lookup);
+        AddKeyControl(table, "Look down [*]", &key_lookdown);
+        AddKeyControl(table, "Center view [*]", &key_lookcenter);
+
+        AddSectionLabel(table, "Movement", false);
+        AddKeyControl(table, "Move Forward (alt.)", &key_alt_up);
+        AddKeyControl(table, "Move Backward (alt.)", &key_alt_down);
+        AddKeyControl(table, "Strafe Left (alt.)", &key_alt_strafeleft);
+        AddKeyControl(table, "Strafe Right (alt.)", &key_alt_straferight);
+        AddKeyControl(table, "Toggle always run", &key_toggleautorun);
+        AddKeyControl(table, "Toggle vert. mouse", &key_togglenovert);
+        AddKeyControl(table, "Quick Reverse", &key_reverse);
+        }
+        else
+        {
         AddSectionLabel(table, "View", false);
 
         AddKeyControl(table, "Look up", &key_lookup);
         AddKeyControl(table, "Look down", &key_lookdown);
         AddKeyControl(table, "Center view", &key_lookcenter);
+        }
 
         if (gamemission == heretic || gamemission == hexen)
         {
@@ -218,10 +244,13 @@ static void ConfigExtraKeys(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(unused))
             AddKeyControl(table, "Fly center", &key_flycenter);
         }
 
+        if (gamemission != doom)
+        {
         AddSectionLabel(table, "Inventory", true);
 
         AddKeyControl(table, "Inventory left", &key_invleft);
         AddKeyControl(table, "Inventory right", &key_invright);
+        }
 
         if (gamemission == strife)
         {
@@ -236,6 +265,7 @@ static void ConfigExtraKeys(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(unused))
             AddKeyControl(table, "Use health", &key_usehealth);
         }
         else
+        if (gamemission == heretic || gamemission == hexen)
         {
             AddKeyControl(table, "Use artifact", &key_useartifact);
         }
@@ -299,6 +329,7 @@ static void OtherKeysDialog(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(unused))
     AddKeyControl(table, "Activate menu item",    &key_menu_forward);
     AddKeyControl(table, "Confirm action",        &key_menu_confirm);
     AddKeyControl(table, "Cancel action",         &key_menu_abort);
+    AddKeyControl(table, "Delete savegame",       &key_menu_del);
 
     AddSectionLabel(table, "Shortcut keys", true);
 
@@ -315,10 +346,13 @@ static void OtherKeysDialog(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(unused))
     AddKeyControl(table, "Quit game",             &key_menu_quit);
     AddKeyControl(table, "Toggle gamma",          &key_menu_gamma);
     AddKeyControl(table, "Multiplayer spy",       &key_spy);
+    AddKeyControl(table, "Go to next level",      &key_menu_nextlevel);
+    AddKeyControl(table, "Reload current level",  &key_menu_reloadlevel);
 
     AddKeyControl(table, "Increase screen size",  &key_menu_incscreen);
     AddKeyControl(table, "Decrease screen size",  &key_menu_decscreen);
     AddKeyControl(table, "Save a screenshot",     &key_menu_screenshot);
+    AddKeyControl(table, "Save a clean screenshot",&key_menu_cleanscreenshot);
 
     AddKeyControl(table, "Display last message",  &key_message_refresh);
     AddKeyControl(table, "Finish recording demo", &key_demo_quit);
@@ -336,6 +370,8 @@ static void OtherKeysDialog(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(unused))
     AddKeyControl(table, "Toggle grid",           &key_map_grid);
     AddKeyControl(table, "Mark location",         &key_map_mark);
     AddKeyControl(table, "Clear all marks",       &key_map_clearmark);
+    AddKeyControl(table, "Overlay mode",          &key_map_overlay);
+    AddKeyControl(table, "Rotate mode",           &key_map_rotate);
 
     AddSectionLabel(table, "Multiplayer", true);
 
@@ -358,7 +394,7 @@ static void OtherKeysDialog(TXT_UNCAST_ARG(widget), TXT_UNCAST_ARG(unused))
     TXT_AddWidget(window, scrollpane);
 }
 
-void ConfigKeyboard(void)
+void ConfigKeyboard(TXT_UNCAST_ARG(widget), void *user_data)
 {
     txt_window_t *window;
     txt_checkbox_t *run_control;
@@ -396,6 +432,11 @@ void ConfigKeyboard(void)
     if (gamemission == hexen || gamemission == strife)
     {
         AddKeyControl(window, "Jump", &key_jump);
+    }
+    else
+    if (gamemission == doom) // Crispy
+    {
+        AddKeyControl(window, "Jump [*]", &key_jump);
     }
 
     TXT_AddWidget(window, TXT_NewSeparator("Action"));

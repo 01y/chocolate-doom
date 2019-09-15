@@ -21,15 +21,25 @@
 #define __I_VIDEO__
 
 #include "doomtype.h"
+#include "crispy.h"
 
 // Screen width and height.
 
-#define SCREENWIDTH  320
-#define SCREENHEIGHT 200
+#define ORIGWIDTH  320 // [crispy]
+#define ORIGHEIGHT 200 // [crispy]
+
+#define MAXWIDTH  (ORIGWIDTH << 1) // [crispy]
+#define MAXHEIGHT (ORIGHEIGHT << 1) // [crispy]
+
+extern int SCREENWIDTH;
+extern int SCREENHEIGHT;
 
 // Screen height used when aspect_ratio_correct=true.
 
-#define SCREENHEIGHT_4_3 240
+#define ORIGHEIGHT_4_3 240 // [crispy]
+#define MAXHEIGHT_4_3 (ORIGHEIGHT_4_3 << 1) // [crispy]
+
+extern int SCREENHEIGHT_4_3;
 
 typedef boolean (*grabmouse_callback_t)(void);
 
@@ -43,8 +53,13 @@ void I_GraphicsCheckCommandLine(void);
 void I_ShutdownGraphics(void);
 
 // Takes full 8 bit values.
+#ifndef CRISPY_TRUECOLOR
 void I_SetPalette (byte* palette);
 int I_GetPaletteIndex(int r, int g, int b);
+#else
+void I_SetPalette (int palette);
+extern const pixel_t I_MapRGB (const uint8_t r, const uint8_t g, const uint8_t b);
+#endif
 
 void I_UpdateNoBlit (void);
 void I_FinishUpdate (void);

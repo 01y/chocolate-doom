@@ -27,6 +27,7 @@
 #include "i_swap.h"
 #include "m_argv.h"
 #include "m_bbox.h"
+#include "m_misc.h" // [crispy] M_StringJoin()
 
 #include "g_game.h"
 
@@ -37,9 +38,11 @@
 #include "p_local.h"
 
 #include "s_sound.h"
+#include "s_musinfo.h" // [crispy] S_ParseMusInfo()
 
 #include "doomstat.h"
 
+#include "p_extnodes.h" // [crispy] support extended node formats
 
 void	P_SpawnMapThing (mapthing_t*	mthing);
 
@@ -81,9 +84,9 @@ static int      totallines;
 // Blockmap size.
 int		bmapwidth;
 int		bmapheight;	// size in mapblocks
-short*		blockmap;	// int for larger maps
+int32_t*	blockmap;	// int for larger maps // [crispy] BLOCKMAP limit
 // offsets in blockmap are from here
-short*		blockmaplump;		
+int32_t*	blockmaplump; // [crispy] BLOCKMAP limit
 // origin of block map
 fixed_t		bmaporgx;
 fixed_t		bmaporgy;
@@ -107,7 +110,21 @@ byte*		rejectmatrix;
 mapthing_t	deathmatchstarts[MAX_DEATHMATCH_STARTS];
 mapthing_t*	deathmatch_p;
 mapthing_t	playerstarts[MAXPLAYERS];
+boolean     playerstartsingame[MAXPLAYERS];
 
+// [crispy] recalculate seg offsets
+// adapted from prboom-plus/src/p_setup.c:474-482
+fixed_t GetOffset(vertex_t *v1, vertex_t *v2)
+{
+    fixed_t dx, dy;
+    fixed_t r;
+
+    dx = (v1->x - v2->x)>>FRACBITS;
+    dy = (v1->y - v2->y)>>FRACBITS;
+    r = (fixed_t)(sqrt(dx*dx + dy*dy))<<FRACBITS;
+
+    return r;
+}
 
 
 
@@ -141,6 +158,14 @@ void P_LoadVertexes (int lump)
     {
 	li->x = SHORT(ml->x)<<FRACBITS;
 	li->y = SHORT(ml->y)<<FRACBITS;
+
+	if (crispy->fliplevels)
+	    li->x = -li->x;
+
+	// [crispy] initialize vertex coordinates *only* used in rendering
+	li->r_x = li->x;
+	li->r_y = li->y;
+	li->moved = false;
     }
 
     // Free buffer memory.
@@ -189,12 +214,23 @@ void P_LoadSegs (int lump)
     li = segs;
     for (i=0 ; i<numsegs ; i++, li++, ml++)
     {
-	li->v1 = &vertexes[SHORT(ml->v1)];
-	li->v2 = &vertexes[SHORT(ml->v2)];
+	li->v1 = &vertexes[(unsigned short)SHORT(ml->v1)]; // [crispy] extended nodes
+	li->v2 = &vertexes[(unsigned short)SHORT(ml->v2)]; // [crispy] extended nodes
+
+	if (crispy->fliplevels)
+	{
+            vertex_t* tmp = li->v1;
+            li->v1 = li->v2;
+            li->v2 = tmp;
+	}
 
 	li->angle = (SHORT(ml->angle))<<FRACBITS;
-	li->offset = (SHORT(ml->offset))<<FRACBITS;
-	linedef = SHORT(ml->linedef);
+
+	if (crispy->fliplevels)
+            li->angle = -li->angle;
+
+//	li->offset = (SHORT(ml->offset))<<FRACBITS; // [crispy] recalculated below
+	linedef = (unsigned short)SHORT(ml->linedef); // [crispy] extended nodes
 	ldef = &lines[linedef];
 	li->linedef = ldef;
 	side = SHORT(ml->side);
@@ -208,6 +244,8 @@ void P_LoadSegs (int lump)
 
 	li->sidedef = &sides[ldef->sidenum[side]];
 	li->frontsector = sides[ldef->sidenum[side]].sector;
+	// [crispy] recalculate
+	li->offset = GetOffset(li->v1, ((ml->side ^ crispy->fliplevels) ? ldef->v2 : ldef->v1));
 
         if (ldef-> flags & ML_TWOSIDED)
         {
@@ -221,6 +259,15 @@ void P_LoadSegs (int lump)
 
             if (sidenum < 0 || sidenum >= numsides)
             {
+                // [crispy] linedef has two-sided flag set, but no valid second sidedef;
+                // but since it has a midtexture, it is supposed to be rendered just
+                // like a regular one-sided linedef
+                if (li->sidedef->midtexture)
+                {
+                    li->backsector = 0;
+                    fprintf(stderr, "P_LoadSegs: Linedef %d has two-sided flag set, but no second sidedef\n", i);
+                }
+                else
                 li->backsector = GetSectorAtNullAddress();
             }
             else
@@ -237,6 +284,46 @@ void P_LoadSegs (int lump)
     W_ReleaseLumpNum(lump);
 }
 
+// [crispy] fix long wall wobble
+void P_SegLengths (boolean contrast_only)
+{
+    int i;
+    const int rightangle = abs(finesine[(ANG60/2) >> ANGLETOFINESHIFT]);
+
+    for (i = 0; i < numsegs; i++)
+    {
+	seg_t *const li = &segs[i];
+	int64_t dx, dy;
+
+	dx = li->v2->r_x - li->v1->r_x;
+	dy = li->v2->r_y - li->v1->r_y;
+
+	if (!contrast_only)
+	{
+		li->length = (uint32_t)(sqrt((double)dx*dx + (double)dy*dy)/2);
+
+		// [crispy] re-calculate angle used for rendering
+		viewx = li->v1->r_x;
+		viewy = li->v1->r_y;
+		li->r_angle = R_PointToAngleCrispy(li->v2->r_x, li->v2->r_y);
+	}
+
+	// [crispy] smoother fake contrast
+	if (!dy)
+	    li->fakecontrast = -LIGHTBRIGHT;
+	else
+	if (abs(finesine[li->r_angle >> ANGLETOFINESHIFT]) < rightangle)
+	    li->fakecontrast = -(LIGHTBRIGHT >> 1);
+	else
+	if (!dx)
+	    li->fakecontrast = LIGHTBRIGHT;
+	else
+	if (abs(finecosine[li->r_angle >> ANGLETOFINESHIFT]) < rightangle)
+	    li->fakecontrast = LIGHTBRIGHT >> 1;
+	else
+	    li->fakecontrast = 0;
+    }
+}
 
 //
 // P_LoadSubsectors
@@ -252,14 +339,18 @@ void P_LoadSubsectors (int lump)
     subsectors = Z_Malloc (numsubsectors*sizeof(subsector_t),PU_LEVEL,0);	
     data = W_CacheLumpNum (lump,PU_STATIC);
 	
+    // [crispy] fail on missing subsectors
+    if (!data || !numsubsectors)
+	I_Error("P_LoadSubsectors: No subsectors in map!");
+
     ms = (mapsubsector_t *)data;
     memset (subsectors,0, numsubsectors*sizeof(subsector_t));
     ss = subsectors;
     
     for (i=0 ; i<numsubsectors ; i++, ss++, ms++)
     {
-	ss->numlines = SHORT(ms->numsegs);
-	ss->firstline = SHORT(ms->firstseg);
+	ss->numlines = (unsigned short)SHORT(ms->numsegs); // [crispy] extended nodes
+	ss->firstline = (unsigned short)SHORT(ms->firstseg); // [crispy] extended nodes
     }
 	
     W_ReleaseLumpNum(lump);
@@ -277,11 +368,19 @@ void P_LoadSectors (int lump)
     mapsector_t*	ms;
     sector_t*		ss;
 	
+    // [crispy] fail on missing sectors
+    if (lump >= numlumps)
+	I_Error("P_LoadSectors: No sectors in map!");
+
     numsectors = W_LumpLength (lump) / sizeof(mapsector_t);
     sectors = Z_Malloc (numsectors*sizeof(sector_t),PU_LEVEL,0);	
     memset (sectors, 0, numsectors*sizeof(sector_t));
     data = W_CacheLumpNum (lump,PU_STATIC);
 	
+    // [crispy] fail on missing sectors
+    if (!data || !numsectors)
+	I_Error("P_LoadSectors: No sectors in map!");
+
     ms = (mapsector_t *)data;
     ss = sectors;
     for (i=0 ; i<numsectors ; i++, ss++, ms++)
@@ -294,6 +393,17 @@ void P_LoadSectors (int lump)
 	ss->special = SHORT(ms->special);
 	ss->tag = SHORT(ms->tag);
 	ss->thinglist = NULL;
+	// [crispy] WiggleFix: [kb] for R_FixWiggle()
+	ss->cachedheight = 0;
+        // [AM] Sector interpolation.  Even if we're
+        //      not running uncapped, the renderer still
+        //      uses this data.
+        ss->oldfloorheight = ss->floorheight;
+        ss->interpfloorheight = ss->floorheight;
+        ss->oldceilingheight = ss->ceilingheight;
+        ss->interpceilingheight = ss->ceilingheight;
+        // [crispy] inhibit sector interpolation during the 0th gametic
+        ss->oldgametic = -1;
     }
 	
     W_ReleaseLumpNum(lump);
@@ -316,6 +426,15 @@ void P_LoadNodes (int lump)
     nodes = Z_Malloc (numnodes*sizeof(node_t),PU_LEVEL,0);	
     data = W_CacheLumpNum (lump,PU_STATIC);
 	
+    // [crispy] warn about missing nodes
+    if (!data || !numnodes)
+    {
+	if (numsubsectors == 1)
+	    fprintf(stderr, "P_LoadNodes: No nodes in map, but only one subsector.\n");
+	else
+	    I_Error("P_LoadNodes: No nodes in map!");
+    }
+
     mn = (mapnode_t *)data;
     no = nodes;
     
@@ -325,11 +444,43 @@ void P_LoadNodes (int lump)
 	no->y = SHORT(mn->y)<<FRACBITS;
 	no->dx = SHORT(mn->dx)<<FRACBITS;
 	no->dy = SHORT(mn->dy)<<FRACBITS;
+
+	if (crispy->fliplevels)
+	{
+	    no->x += no->dx;
+	    no->y += no->dy;
+	    no->x = -no->x;
+	    no->dy = -no->dy;
+	}
+
 	for (j=0 ; j<2 ; j++)
 	{
-	    no->children[j] = SHORT(mn->children[j]);
+	    no->children[j] = (unsigned short)SHORT(mn->children[j]); // [crispy] extended nodes
+
+	    // [crispy] add support for extended nodes
+	    // from prboom-plus/src/p_setup.c:937-957
+	    if (no->children[j] == 0xFFFF)
+		no->children[j] = -1;
+	    else
+	    if (no->children[j] & 0x8000)
+	    {
+		no->children[j] &= ~0x8000;
+
+		if (no->children[j] >= numsubsectors)
+		    no->children[j] = 0;
+
+		no->children[j] |= NF_SUBSECTOR;
+	    }
+
 	    for (k=0 ; k<4 ; k++)
 		no->bbox[j][k] = SHORT(mn->bbox[j][k])<<FRACBITS;
+
+	    if (crispy->fliplevels)
+	    {
+		fixed_t tmp = no->bbox[j][2];
+		no->bbox[j][2] = -no->bbox[j][3];
+		no->bbox[j][3] = -tmp;
+	    }
 	}
     }
 	
@@ -386,7 +537,25 @@ void P_LoadThings (int lump)
 	spawnthing.type = SHORT(mt->type);
 	spawnthing.options = SHORT(mt->options);
 	
+	if (crispy->fliplevels)
+	{
+	    spawnthing.x = -spawnthing.x;
+	    spawnthing.angle = 180 - spawnthing.angle;
+	}
+
 	P_SpawnMapThing(&spawnthing);
+    }
+
+    if (!deathmatch)
+    {
+        for (i = 0; i < MAXPLAYERS; i++)
+        {
+            if (playeringame[i] && !playerstartsingame[i])
+            {
+                I_Error("P_LoadThings: Player %d start missing (vanilla crashes here)", i + 1);
+            }
+            playerstartsingame[i] = false;
+        }
     }
 
     W_ReleaseLumpNum(lump);
@@ -405,6 +574,7 @@ void P_LoadLineDefs (int lump)
     line_t*		ld;
     vertex_t*		v1;
     vertex_t*		v2;
+    int warn, warn2; // [crispy] warn about invalid linedefs
 	
     numlines = W_LumpLength (lump) / sizeof(maplinedef_t);
     lines = Z_Malloc (numlines*sizeof(line_t),PU_LEVEL,0);	
@@ -413,13 +583,58 @@ void P_LoadLineDefs (int lump)
 	
     mld = (maplinedef_t *)data;
     ld = lines;
+    warn = warn2 = 0; // [crispy] warn about invalid linedefs
     for (i=0 ; i<numlines ; i++, mld++, ld++)
     {
-	ld->flags = SHORT(mld->flags);
+	ld->flags = (unsigned short)SHORT(mld->flags); // [crispy] extended nodes
 	ld->special = SHORT(mld->special);
+	// [crispy] warn about unknown linedef types
+	if ((unsigned short) ld->special > 141)
+	{
+	    fprintf(stderr, "P_LoadLineDefs: Unknown special %d at line %d.\n", ld->special, i);
+	    warn++;
+	}
 	ld->tag = SHORT(mld->tag);
-	v1 = ld->v1 = &vertexes[SHORT(mld->v1)];
-	v2 = ld->v2 = &vertexes[SHORT(mld->v2)];
+	// [crispy] warn about special linedefs without tag
+	if (ld->special && !ld->tag)
+	{
+	    switch (ld->special)
+	    {
+		case 1:	// Vertical Door
+		case 26:	// Blue Door/Locked
+		case 27:	// Yellow Door /Locked
+		case 28:	// Red Door /Locked
+		case 31:	// Manual door open
+		case 32:	// Blue locked door open
+		case 33:	// Red locked door open
+		case 34:	// Yellow locked door open
+		case 117:	// Blazing door raise
+		case 118:	// Blazing door open
+		case 271:	// MBF sky transfers
+		case 272:
+		case 48:	// Scroll Wall Left
+		case 85:	// [crispy] [JN] (Boom) Scroll Texture Right
+		case 11:	// s1 Exit level
+		case 51:	// s1 Secret exit
+		case 52:	// w1 Exit level
+		case 124:	// w1 Secret exit
+		    break;
+		default:
+		    fprintf(stderr, "P_LoadLineDefs: Special linedef %d without tag.\n", i);
+		    warn2++;
+		    break;
+	    }
+	}
+	if (crispy->fliplevels)
+	{
+	    v1 = ld->v2 = &vertexes[(unsigned short)SHORT(mld->v2)]; // [crispy] extended nodes
+	    v2 = ld->v1 = &vertexes[(unsigned short)SHORT(mld->v1)]; // [crispy] extended nodes
+	}
+	else
+	{
+	v1 = ld->v1 = &vertexes[(unsigned short)SHORT(mld->v1)]; // [crispy] extended nodes
+	v2 = ld->v2 = &vertexes[(unsigned short)SHORT(mld->v2)]; // [crispy] extended nodes
+	}
 	ld->dx = v2->x - v1->x;
 	ld->dy = v2->y - v1->y;
 	
@@ -457,18 +672,44 @@ void P_LoadLineDefs (int lump)
 	    ld->bbox[BOXTOP] = v1->y;
 	}
 
+	// [crispy] calculate sound origin of line to be its midpoint
+	ld->soundorg.x = ld->bbox[BOXLEFT] / 2 + ld->bbox[BOXRIGHT] / 2;
+	ld->soundorg.y = ld->bbox[BOXTOP] / 2 + ld->bbox[BOXBOTTOM] / 2;
+
 	ld->sidenum[0] = SHORT(mld->sidenum[0]);
 	ld->sidenum[1] = SHORT(mld->sidenum[1]);
 
-	if (ld->sidenum[0] != -1)
+	// [crispy] substitute dummy sidedef for missing right side
+	if (ld->sidenum[0] == NO_INDEX)
+	{
+	    ld->sidenum[0] = 0;
+	    fprintf(stderr, "P_LoadLineDefs: linedef %d without first sidedef!\n", i);
+	}
+
+	if (ld->sidenum[0] != NO_INDEX) // [crispy] extended nodes
 	    ld->frontsector = sides[ld->sidenum[0]].sector;
 	else
 	    ld->frontsector = 0;
 
-	if (ld->sidenum[1] != -1)
+	if (ld->sidenum[1] != NO_INDEX) // [crispy] extended nodes
 	    ld->backsector = sides[ld->sidenum[1]].sector;
 	else
 	    ld->backsector = 0;
+    }
+
+    // [crispy] warn about unknown linedef types
+    if (warn)
+    {
+	fprintf(stderr, "P_LoadLineDefs: Found %d line%s with unknown linedef type.\n", warn, (warn > 1) ? "s" : "");
+    }
+    // [crispy] warn about special linedefs without tag
+    if (warn2)
+    {
+	fprintf(stderr, "P_LoadLineDefs: Found %d special linedef%s without tag.\n", warn2, (warn2 > 1) ? "s" : "");
+    }
+    if (warn || warn2)
+    {
+	fprintf(stderr, "THIS MAP MAY NOT WORK AS EXPECTED!\n");
     }
 
     W_ReleaseLumpNum(lump);
@@ -500,6 +741,8 @@ void P_LoadSideDefs (int lump)
 	sd->bottomtexture = R_TextureNumForName(msd->bottomtexture);
 	sd->midtexture = R_TextureNumForName(msd->midtexture);
 	sd->sector = &sectors[SHORT(msd->sector)];
+	// [crispy] smooth texture scrolling
+	sd->basetextureoffset = sd->textureoffset;
     }
 
     W_ReleaseLumpNum(lump);
@@ -509,25 +752,43 @@ void P_LoadSideDefs (int lump)
 //
 // P_LoadBlockMap
 //
-void P_LoadBlockMap (int lump)
+boolean P_LoadBlockMap (int lump)
 {
     int i;
     int count;
     int lumplen;
+    short *wadblockmaplump;
 
-    lumplen = W_LumpLength(lump);
-    count = lumplen / 2;
+    // [crispy] (re-)create BLOCKMAP if necessary
+    if (M_CheckParm("-blockmap") ||
+        lump >= numlumps ||
+        (lumplen = W_LumpLength(lump)) < 8 ||
+        (count = lumplen / 2) >= 0x10000)
+    {
+	return false;
+    }
 	
-    blockmaplump = Z_Malloc(lumplen, PU_LEVEL, NULL);
-    W_ReadLump(lump, blockmaplump);
+    // [crispy] remove BLOCKMAP limit
+    // adapted from boom202s/P_SETUP.C:1025-1076
+    wadblockmaplump = Z_Malloc(lumplen, PU_LEVEL, NULL);
+    W_ReadLump(lump, wadblockmaplump);
+    blockmaplump = Z_Malloc(sizeof(*blockmaplump) * count, PU_LEVEL, NULL);
     blockmap = blockmaplump + 4;
+
+    blockmaplump[0] = SHORT(wadblockmaplump[0]);
+    blockmaplump[1] = SHORT(wadblockmaplump[1]);
+    blockmaplump[2] = (int32_t)(SHORT(wadblockmaplump[2])) & 0xffff;
+    blockmaplump[3] = (int32_t)(SHORT(wadblockmaplump[3])) & 0xffff;
 
     // Swap all short integers to native byte ordering.
   
-    for (i=0; i<count; i++)
+    for (i=4; i<count; i++)
     {
-	blockmaplump[i] = SHORT(blockmaplump[i]);
+	short t = SHORT(wadblockmaplump[i]);
+	blockmaplump[i] = (t == -1) ? -1l : (int32_t) t & 0xffff;
     }
+
+    Z_Free(wadblockmaplump);
 		
     // Read the header
 
@@ -536,11 +797,37 @@ void P_LoadBlockMap (int lump)
     bmapwidth = blockmaplump[2];
     bmapheight = blockmaplump[3];
 	
+    if (crispy->fliplevels)
+    {
+	int x, y;
+	int32_t* rowoffset; // [crispy] BLOCKMAP limit
+
+	bmaporgx += bmapwidth * 128 * FRACUNIT;
+	bmaporgx = -bmaporgx;
+
+	for (y = 0; y < bmapheight; y++)
+	{
+	    rowoffset = blockmap + y * bmapwidth;
+
+	    for (x = 0; x < bmapwidth / 2; x++)
+	    {
+	        int32_t tmp; // [crispy] BLOCKMAP limit
+
+	        tmp = rowoffset[x];
+	        rowoffset[x] = rowoffset[bmapwidth-1-x];
+	        rowoffset[bmapwidth-1-x] = tmp;
+	    }
+	}
+    }
+
     // Clear out mobj chains
 
     count = sizeof(*blocklinks) * bmapwidth * bmapheight;
     blocklinks = Z_Malloc(count, PU_LEVEL, 0);
     memset(blocklinks, 0, count);
+
+    // [crispy] (re-)create BLOCKMAP if necessary
+    return true;
 }
 
 
@@ -663,6 +950,59 @@ void P_GroupLines (void)
 	
 }
 
+// [crispy] remove slime trails
+// mostly taken from Lee Killough's implementation in mbfsrc/P_SETUP.C:849-924,
+// with the exception that not the actual vertex coordinates are modified,
+// but separate coordinates that are *only* used in rendering,
+// i.e. r_bsp.c:R_AddLine()
+
+static void P_RemoveSlimeTrails(void)
+{
+    int i;
+
+    for (i = 0; i < numsegs; i++)
+    {
+	const line_t *l = segs[i].linedef;
+	vertex_t *v = segs[i].v1;
+
+	// [crispy] ignore exactly vertical or horizontal linedefs
+	if (l->dx && l->dy)
+	{
+	    do
+	    {
+		// [crispy] vertex wasn't already moved
+		if (!v->moved)
+		{
+		    v->moved = true;
+		    // [crispy] ignore endpoints of linedefs
+		    if (v != l->v1 && v != l->v2)
+		    {
+			// [crispy] move the vertex towards the linedef
+			// by projecting it using the law of cosines
+			int64_t dx2 = (l->dx >> FRACBITS) * (l->dx >> FRACBITS);
+			int64_t dy2 = (l->dy >> FRACBITS) * (l->dy >> FRACBITS);
+			int64_t dxy = (l->dx >> FRACBITS) * (l->dy >> FRACBITS);
+			int64_t s = dx2 + dy2;
+
+			// [crispy] MBF actually overrides v->x and v->y here
+			v->r_x = (fixed_t)((dx2 * v->x + dy2 * l->v1->x + dxy * (v->y - l->v1->y)) / s);
+			v->r_y = (fixed_t)((dy2 * v->y + dx2 * l->v1->y + dxy * (v->x - l->v1->x)) / s);
+
+			// [crispy] wait a minute... moved more than 8 map units?
+			// maybe that's a linguortal then, back to the original coordinates
+			if (abs(v->r_x - v->x) > 8*FRACUNIT || abs(v->r_y - v->y) > 8*FRACUNIT)
+			{
+			    v->r_x = v->x;
+			    v->r_y = v->y;
+			}
+		    }
+		}
+	    // [crispy] if v doesn't point to the second vertex of the seg already, point it there
+	    } while ((v != segs[i].v2) && (v = segs[i].v2));
+	}
+    }
+}
+
 // Pad the REJECT lump with extra data when the lump is too small,
 // to simulate a REJECT buffer overflow in Vanilla Doom.
 
@@ -747,42 +1087,22 @@ static void P_LoadReject(int lumpnum)
     }
 }
 
-//
-// P_SetupLevel
-//
-void
-P_SetupLevel
-( int		episode,
-  int		map,
-  int		playermask,
-  skill_t	skill)
+// [crispy] log game skill in plain text
+const char *skilltable[] =
 {
-    int		i;
+    "Nothing",
+    "Baby",
+    "Easy",
+    "Normal",
+    "Hard",
+    "Nightmare"
+};
+
+// [crispy] factor out map lump name and number finding into a separate function
+int P_GetNumForMap (int episode, int map, boolean critical)
+{
     char	lumpname[9];
     int		lumpnum;
-	
-    totalkills = totalitems = totalsecret = wminfo.maxfrags = 0;
-    wminfo.partime = 180;
-    for (i=0 ; i<MAXPLAYERS ; i++)
-    {
-	players[i].killcount = players[i].secretcount 
-	    = players[i].itemcount = 0;
-    }
-
-    // Initial height of PointOfView
-    // will be set by player think.
-    players[consoleplayer].viewz = 1; 
-
-    // Make sure all sounds are stopped before Z_FreeTags.
-    S_Start ();			
-
-    Z_FreeTags (PU_LEVEL, PU_PURGELEVEL-1);
-
-    // UNUSED W_Profile ();
-    P_InitThinkers ();
-
-    // if working with a devlopment map, reload it
-    W_Reload ();
 
     // find map name
     if ( gamemode == commercial)
@@ -801,26 +1121,197 @@ P_SetupLevel
 	lumpname[4] = 0;
     }
 
+    // [crispy] special-casing for E1M10 "Sewers" support
+    if (crispy->havee1m10 && episode == 1 && map == 10)
+	DEH_snprintf(lumpname, 9, "E1M10");
+
+    lumpnum = critical ? W_GetNumForName (lumpname) : W_CheckNumForName (lumpname);
+
+    if (nervewadfile && episode != 2 && map <= 9)
+    {
+        lumpnum = W_CheckNumForNameFromTo (lumpname, lumpnum - 1, 0);
+    }
+
+    return lumpnum;
+}
+
+// pointer to the current map lump info struct
+lumpinfo_t *maplumpinfo;
+
+//
+// P_SetupLevel
+//
+void
+P_SetupLevel
+( int		episode,
+  int		map,
+  int		playermask,
+  skill_t	skill)
+{
+    int		i;
+    char	lumpname[9];
+    int		lumpnum;
+    boolean	crispy_validblockmap;
+    mapformat_t	crispy_mapformat;
+	
+    totalkills = totalitems = totalsecret = wminfo.maxfrags = 0;
+    // [crispy] count spawned monsters
+    extrakills = 0;
+    wminfo.partime = 180;
+    for (i=0 ; i<MAXPLAYERS ; i++)
+    {
+	players[i].killcount = players[i].secretcount 
+	    = players[i].itemcount = 0;
+    }
+
+    // [crispy] No Rest for the Living ...
+    if (nervewadfile)
+    {
+        if (episode == 2)
+        {
+            gamemission = pack_nerve;
+        }
+        else
+        {
+            gamemission = doom2;
+        }
+    }
+    else
+    {
+        if (gamemission == pack_nerve)
+        {
+            episode = gameepisode = 2;
+        }
+    }
+
+    // Initial height of PointOfView
+    // will be set by player think.
+    players[consoleplayer].viewz = 1; 
+
+    // [crispy] stop demo warp mode now
+    if (crispy->demowarp == map)
+    {
+	crispy->demowarp = 0;
+	nodrawers = false;
+	singletics = false;
+    }
+
+    // [crispy] don't load map's default music if loaded from a savegame with MUSINFO data
+    if (!musinfo.from_savegame)
+    {
+    // Make sure all sounds are stopped before Z_FreeTags.
+    S_Start ();			
+    }
+    musinfo.from_savegame = false;
+
+    Z_FreeTags (PU_LEVEL, PU_PURGELEVEL-1);
+
+    // UNUSED W_Profile ();
+    P_InitThinkers ();
+
+    // if working with a devlopment map, reload it
+    W_Reload ();
+
+// [crispy] factor out map lump name and number finding into a separate function
+/*
+    // find map name
+    if ( gamemode == commercial)
+    {
+	if (map<10)
+	    DEH_snprintf(lumpname, 9, "map0%i", map);
+	else
+	    DEH_snprintf(lumpname, 9, "map%i", map);
+    }
+    else
+    {
+	lumpname[0] = 'E';
+	lumpname[1] = '0' + episode;
+	lumpname[2] = 'M';
+	lumpname[3] = '0' + map;
+	lumpname[4] = 0;
+    }
+
     lumpnum = W_GetNumForName (lumpname);
+*/
+    lumpnum = P_GetNumForMap (episode, map, true);
 	
+    maplumpinfo = lumpinfo[lumpnum];
+    strncpy(lumpname, maplumpinfo->name, 8);
+
     leveltime = 0;
+    oldleveltime = 0;
 	
+    // [crispy] better logging
+    {
+	extern int savedleveltime;
+	const int ltime = savedleveltime / TICRATE,
+	          ttime = (totalleveltimes + savedleveltime) / TICRATE;
+	char *rfn_str;
+
+	rfn_str = M_StringJoin(
+	    respawnparm ? " -respawn" : "",
+	    fastparm ? " -fast" : "",
+	    nomonsters ? " -nomonsters" : "",
+	    NULL);
+
+	fprintf(stderr, "P_SetupLevel: %s (%s) %s%s %d:%02d:%02d/%d:%02d:%02d ",
+	    maplumpinfo->name, W_WadNameForLump(maplumpinfo),
+	    skilltable[BETWEEN(0,5,(int) skill+1)], rfn_str,
+	    ltime/3600, (ltime%3600)/60, ltime%60,
+	    ttime/3600, (ttime%3600)/60, ttime%60);
+
+	free(rfn_str);
+    }
+    // [crispy] check and log map and nodes format
+    crispy_mapformat = P_CheckMapFormat(lumpnum);
+
     // note: most of this ordering is important	
-    P_LoadBlockMap (lumpnum+ML_BLOCKMAP);
+    crispy_validblockmap = P_LoadBlockMap (lumpnum+ML_BLOCKMAP); // [crispy] (re-)create BLOCKMAP if necessary
     P_LoadVertexes (lumpnum+ML_VERTEXES);
     P_LoadSectors (lumpnum+ML_SECTORS);
     P_LoadSideDefs (lumpnum+ML_SIDEDEFS);
 
+    if (crispy_mapformat & MFMT_HEXEN)
+	P_LoadLineDefs_Hexen (lumpnum+ML_LINEDEFS);
+    else
     P_LoadLineDefs (lumpnum+ML_LINEDEFS);
+    // [crispy] (re-)create BLOCKMAP if necessary
+    if (!crispy_validblockmap)
+    {
+	extern void P_CreateBlockMap (void);
+	P_CreateBlockMap();
+    }
+    if (crispy_mapformat & (MFMT_ZDBSPX | MFMT_ZDBSPZ))
+	P_LoadNodes_ZDBSP (lumpnum+ML_NODES, crispy_mapformat & MFMT_ZDBSPZ);
+    else
+    if (crispy_mapformat & MFMT_DEEPBSP)
+    {
+	P_LoadSubsectors_DeePBSP (lumpnum+ML_SSECTORS);
+	P_LoadNodes_DeePBSP (lumpnum+ML_NODES);
+	P_LoadSegs_DeePBSP (lumpnum+ML_SEGS);
+    }
+    else
+    {
     P_LoadSubsectors (lumpnum+ML_SSECTORS);
     P_LoadNodes (lumpnum+ML_NODES);
     P_LoadSegs (lumpnum+ML_SEGS);
+    }
 
     P_GroupLines ();
     P_LoadReject (lumpnum+ML_REJECT);
 
+    // [crispy] remove slime trails
+    P_RemoveSlimeTrails();
+    // [crispy] fix long wall wobble
+    P_SegLengths(false);
+    // [crispy] blinking key or skull in the status bar
+    memset(st_keyorskull, 0, sizeof(st_keyorskull));
+
     bodyqueslot = 0;
     deathmatch_p = deathmatchstarts;
+    if (crispy_mapformat & MFMT_HEXEN)
+	P_LoadThings_Hexen (lumpnum+ML_THINGS);
+    else
     P_LoadThings (lumpnum+ML_THINGS);
     
     // if deathmatch, randomly spawn the active players
@@ -833,6 +1324,11 @@ P_SetupLevel
 		G_DeathMatchSpawnPlayer (i);
 	    }
 			
+    }
+    // [crispy] support MUSINFO lump (dynamic music changing)
+    if (gamemode != shareware)
+    {
+	S_ParseMusInfo(lumpname);
     }
 
     // clear special respawning que
@@ -852,6 +1348,36 @@ P_SetupLevel
 
 }
 
+// [crispy] height of the spawnstate's first sprite in pixels
+static void P_InitActualHeights (void)
+{
+	int i;
+
+	for (i = 0; i < NUMMOBJTYPES; i++)
+	{
+		state_t *state;
+		spritedef_t *sprdef;
+		spriteframe_t *sprframe;
+		int lump;
+		patch_t *patch;
+
+		state = &states[mobjinfo[i].spawnstate];
+		sprdef = &sprites[state->sprite];
+
+		if (!sprdef->numframes || !(mobjinfo[i].flags & (MF_SOLID|MF_SHOOTABLE)))
+		{
+			mobjinfo[i].actualheight = mobjinfo[i].height;
+			continue;
+		}
+
+		sprframe = &sprdef->spriteframes[state->frame & FF_FRAMEMASK];
+		lump = sprframe->lump[0];
+		patch = W_CacheLumpNum (lump + firstspritelump, PU_CACHE);
+
+		// [crispy] round to the next integer multiple of 8
+		mobjinfo[i].actualheight = ((patch->height + 7) & (~7)) << FRACBITS;
+	}
+}
 
 
 //
@@ -862,6 +1388,7 @@ void P_Init (void)
     P_InitSwitchList ();
     P_InitPicAnims ();
     R_InitSprites (sprnames);
+    P_InitActualHeights();
 }
 
 

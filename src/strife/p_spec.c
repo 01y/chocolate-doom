@@ -141,7 +141,7 @@ anim_t* lastanim;
 //      Animating line specials
 //
 // haleyjd 08/29/10: [STRIFE] MAXLINEANIMS raised from 64 to 96
-#define MAXLINEANIMS            96
+#define MAXLINEANIMS            96*256
 
 extern  short   numlinespecials;
 extern  line_t* linespeciallist[MAXLINEANIMS];
@@ -196,7 +196,7 @@ void P_InitPicAnims (void)
 // villsa [STRIFE] terrain type definitions
 typedef struct
 {
-    char*   flat;
+    const char *flat;
     int     type;
     int     num;
 } terraintype_t;

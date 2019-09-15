@@ -52,7 +52,7 @@ struct _wad_file_s
     unsigned int length;
 
     // File's location on disk.
-    const char *path;
+    char *path; // [crispy] un-const
 };
 
 // Open the specified file. Returns a pointer to a new wad_file_t 

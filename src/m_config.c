@@ -33,6 +33,7 @@
 #include "doomkeys.h"
 #include "i_system.h"
 #include "m_argv.h"
+#include "m_config.h"
 #include "m_misc.h"
 
 #include "z_zone.h"
@@ -45,6 +46,8 @@
 // default.cfg, savegames, etc.
 
 const char *configdir;
+
+static char *autoload_path = "";
 
 // Default filenames for configuration files.
 
@@ -128,6 +131,18 @@ static default_t	doom_defaults_list[] =
     CONFIG_VARIABLE_INT(mouse_sensitivity),
 
     //!
+    // Horizontal mouse sensitivity (strafe)
+    //
+
+    CONFIG_VARIABLE_INT(mouse_sensitivity_x2),
+
+    //!
+    // Vertical mouse sensitivity
+    //
+
+    CONFIG_VARIABLE_INT(mouse_sensitivity_y),
+
+    //!
     // Volume of sound effects, range 0-15.
     //
 
@@ -191,16 +206,40 @@ static default_t	doom_defaults_list[] =
     CONFIG_VARIABLE_KEY(key_down),
 
     //!
+    // Keyboard key to move forward (alternative).
+    //
+
+    CONFIG_VARIABLE_KEY(key_alt_up),
+
+    //!
+    // Keyboard key to move backward (alternative).
+    //
+
+    CONFIG_VARIABLE_KEY(key_alt_down),
+
+    //!
     // Keyboard key to strafe left.
     //
 
     CONFIG_VARIABLE_KEY(key_strafeleft),
 
     //!
+    // Keyboard key to strafe left (alternative).
+    //
+
+    CONFIG_VARIABLE_KEY(key_alt_strafeleft),
+
+    //!
     // Keyboard key to strafe right.
     //
 
     CONFIG_VARIABLE_KEY(key_straferight),
+
+    //!
+    // Keyboard key to strafe right (alternative).
+    //
+
+    CONFIG_VARIABLE_KEY(key_alt_straferight),
 
     //!
     // @game strife
@@ -445,6 +484,22 @@ static default_t	doom_defaults_list[] =
     //
 
     CONFIG_VARIABLE_INT(mouseb_jump),
+
+    //!
+    // @game doom
+    //
+    // Mouse button to enable free looking.
+    //
+
+    CONFIG_VARIABLE_INT(mouseb_mouselook),
+
+    //!
+    // @game doom
+    //
+    // Quick 180° reverse.
+    //
+
+    CONFIG_VARIABLE_INT(mouseb_reverse),
 
     //!
     // If non-zero, joystick input is enabled.
@@ -841,6 +896,22 @@ static default_t extra_defaults_list[] =
     CONFIG_VARIABLE_INT(png_screenshots),
 
     //!
+    // Vertical mouse acceleration factor.  When the speed of mouse movement
+    // exceeds the threshold value (mouse_threshold), the speed is
+    // multiplied by this value.
+    //
+
+    CONFIG_VARIABLE_FLOAT(mouse_acceleration_y),
+
+    //!
+    // Vertical mouse acceleration threshold.  When the speed of mouse movement
+    // exceeds this threshold value, the speed is multiplied by an
+    // acceleration factor (mouse_acceleration).
+    //
+
+    CONFIG_VARIABLE_INT(mouse_threshold_y),
+
+    //!
     // Sound output sample rate, in Hz.  Typical values to use are
     // 11025, 22050, 44100 and 48000.
     //
@@ -922,6 +993,14 @@ static default_t extra_defaults_list[] =
     // possible without clipping occurring.
 
     CONFIG_VARIABLE_FLOAT(libsamplerate_scale),
+
+    //!
+    // Full path to a directory in which WAD files and dehacked patches
+    // can be placed to be automatically loaded on startup. A subdirectory
+    // of this directory matching the IWAD name is checked to find the
+    // files to load.
+
+    CONFIG_VARIABLE_STRING(autoload_path),
 
     //!
     // Full path to a directory containing configuration files for
@@ -1378,6 +1457,18 @@ static default_t extra_defaults_list[] =
     CONFIG_VARIABLE_KEY(key_spy),
 
     //!
+    // Keyboard shortcut to go to next level.
+    //
+
+    CONFIG_VARIABLE_KEY(key_menu_nextlevel),
+
+    //!
+    // Keyboard shortcut to reload current level.
+    //
+
+    CONFIG_VARIABLE_KEY(key_menu_reloadlevel),
+
+    //!
     // Keyboard shortcut to increase the screen size.
     //
 
@@ -1394,6 +1485,18 @@ static default_t extra_defaults_list[] =
     //
 
     CONFIG_VARIABLE_KEY(key_menu_screenshot),
+
+    //!
+    // Keyboard shortcut to save a clean screenshot.
+    //
+
+    CONFIG_VARIABLE_KEY(key_menu_cleanscreenshot),
+
+    //!
+    // Key to delete a savegame.
+    //
+
+    CONFIG_VARIABLE_KEY(key_menu_del),
 
     //!
     // Key to toggle the map view.
@@ -1466,6 +1569,18 @@ static default_t extra_defaults_list[] =
     //
 
     CONFIG_VARIABLE_KEY(key_map_clearmark),
+
+    //!
+    // Key to toggle the overlay mode when in the map view.
+    //
+
+    CONFIG_VARIABLE_KEY(key_map_overlay),
+
+    //!
+    // Key to toggle the rotate mode when in the map view.
+    //
+
+    CONFIG_VARIABLE_KEY(key_map_rotate),
 
     //!
     // Key to select weapon 1.
@@ -1664,6 +1779,332 @@ static default_t extra_defaults_list[] =
     //
 
     CONFIG_VARIABLE_KEY(key_multi_msgplayer8),
+
+    //!
+    // @game doom
+    // Quick 180° reverse.
+    //
+
+    CONFIG_VARIABLE_KEY(key_reverse),
+
+    //!
+    // @game doom
+    // Toggle always run.
+    //
+
+    CONFIG_VARIABLE_KEY(key_toggleautorun),
+
+    //!
+    // @game doom
+    // Toggle vertical mouse movement.
+    //
+
+    CONFIG_VARIABLE_KEY(key_togglenovert),
+
+    //!
+    // @game doom
+    // Invert vertical mouse movement.
+    //
+
+    CONFIG_VARIABLE_KEY(mouse_y_invert),
+
+    //!
+    // @game doom
+    //
+    // Show additional level statistics.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_automapstats),
+
+    //!
+    // @game doom
+    //
+    // Apply brightmaps to select textures and sprites.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_brightmaps),
+
+    //!
+    // @game doom
+    //
+    // Center Weapon when Firing.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_centerweapon),
+
+    //!
+    // @game doom
+    //
+    // Enable Colored Blood.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_coloredblood),
+
+    //!
+    // @game doom
+    //
+    // Show colored numbers in the status bar.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_coloredhud),
+
+    //!
+    // @game doom
+    //
+    // Draw a crosshair.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_crosshair),
+
+    //!
+    // @game doom
+    //
+    // Crosshair Color indicates Health.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_crosshairhealth),
+
+    //!
+    // @game doom
+    //
+    // Highlight Crosshair on target.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_crosshairtarget),
+
+    //!
+    // @game doom
+    //
+    // Crosshair type.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_crosshairtype),
+
+    //!
+    // @game doom
+    //
+    // Show a progress bar when playing back a demo.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_demobar),
+
+    //!
+    // @game doom
+    //
+    // Show a timer when recording or playing pack demos.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_demotimer),
+
+    //!
+    // @game doom
+    //
+    // Timer direction whan playing back a demo.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_demotimerdir),
+
+    //!
+    // @game doom
+    //
+    // Extended Automap.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_extautomap),
+
+    //!
+    // @game doom
+    //
+    // Extended Savegames.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_extsaveg),
+
+    //!
+    // @game doom
+    //
+    // Enable Mirrored Corpses.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_flipcorpses),
+
+    //!
+    // @game doom
+    //
+    // Enable vertical aiming.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_freeaim),
+
+    //!
+    // @game doom
+    //
+    // Enable looking up and down.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_freelook),
+
+    //!
+    // @game doom
+    //
+    // High Resolution Rendering.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_hires),
+
+    //!
+    // @game doom
+    //
+    // Enable jumping.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_jump),
+
+    //!
+    // @game doom
+    //
+    // Show level time.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_leveltime),
+
+    //!
+    // @game doom
+    //
+    // Use the mouse to look up and down.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_mouselook),
+
+    //!
+    // @game doom
+    //
+    // Negative player health.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_neghealth),
+
+    //!
+    // @game doom
+    //
+    // Players may walk over and under shootable things.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_overunder),
+
+    //!
+    // @game doom
+    //
+    // Enable weapon recoil pitch.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_pitch),
+
+    //!
+    // @game doom
+    //
+    // Show player coordinates.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_playercoords),
+
+    //!
+    // @game doom
+    //
+    // Enable weapon recoil thrust.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_recoil),
+
+    //!
+    // @game doom
+    //
+    // Show a centered message and play a sound when a secret is found.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_secretmessage),
+
+    //!
+    // @game doom
+    //
+    // Smooth Diminishing Lighting.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_smoothlight),
+
+    //!
+    // @game doom
+    //
+    // Smooth Scaling.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_smoothscaling),
+
+    //!
+    // @game doom
+    //
+    // Misc. sound fixes.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_soundfix),
+
+    //!
+    // @game doom
+    //
+    // Play sounds in full length.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_soundfull),
+
+    //!
+    // @game doom
+    //
+    // Mono sound effects.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_soundmono),
+
+    //!
+    // @game doom
+    //
+    // Enable translucency.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_translucency),
+
+#ifdef CRISPY_TRUECOLOR
+    //!
+    // @game doom
+    //
+    // Enable true-color rendering (experimental).
+    //
+
+    CONFIG_VARIABLE_INT(crispy_truecolor),
+#endif
+
+    //!
+    // @game doom
+    //
+    // Uncapped Framerate.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_uncapped),
+
+    //!
+    // @game doom
+    //
+    // Enable VSync.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_vsync),
+
+    //!
+    // @game doom
+    //
+    // Squat down weapon on impact.
+    //
+
+    CONFIG_VARIABLE_INT(crispy_weaponsquat),
 };
 
 static default_collection_t extra_defaults =
@@ -1992,7 +2433,10 @@ void M_SaveDefaultsAlternate(const char *main, const char *extra)
 void M_LoadDefaults (void)
 {
     int i;
- 
+
+    // This variable is a special snowflake for no good reason.
+    M_BindStringVariable("autoload_path", &autoload_path);
+
     // check for a custom default file
 
     //!
@@ -2193,7 +2637,10 @@ static char *GetDefaultConfigDir(void)
     char *result;
 
     result = SDL_GetPrefPath("", PACKAGE_TARNAME);
-    return result;
+    if (result != NULL)
+    {
+        return result;
+    }
 #endif /* #ifndef _WIN32 */
     return M_StringDuplicate("");
 }
@@ -2226,6 +2673,45 @@ void M_SetConfigDir(const char *dir)
     // Make the directory if it doesn't already exist:
 
     M_MakeDirectory(configdir);
+}
+
+#define MUSIC_PACK_README \
+"Extract music packs into this directory in .flac or .ogg format;\n"   \
+"they will be automatically loaded based on filename to replace the\n" \
+"in-game music with high quality versions.\n\n" \
+"For more information check here:\n\n" \
+"  <https://www.chocolate-doom.org/wiki/index.php/Digital_music_packs>\n\n"
+
+// Set the value of music_pack_path if it is currently empty, and create
+// the directory if necessary.
+void M_SetMusicPackDir(void)
+{
+    const char *current_path;
+    char *prefdir, *music_pack_path, *readme_path;
+
+    current_path = M_GetStringVariable("music_pack_path");
+
+    if (current_path != NULL && strlen(current_path) > 0)
+    {
+        return;
+    }
+
+    prefdir = SDL_GetPrefPath("", PACKAGE_TARNAME);
+    music_pack_path = M_StringJoin(prefdir, "music-packs", NULL);
+
+    M_MakeDirectory(prefdir);
+    M_MakeDirectory(music_pack_path);
+    M_SetVariable("music_pack_path", music_pack_path);
+
+    // We write a README file with some basic instructions on how to use
+    // the directory.
+    readme_path = M_StringJoin(music_pack_path, DIR_SEPARATOR_S,
+                               "README.txt", NULL);
+    M_WriteFile(readme_path, MUSIC_PACK_README, strlen(MUSIC_PACK_README));
+
+    free(readme_path);
+    free(music_pack_path);
+    SDL_free(prefdir);
 }
 
 //
@@ -2293,5 +2779,31 @@ char *M_GetSaveGameDir(const char *iwadname)
     }
 
     return savegamedir;
+}
+
+//
+// Calculate the path to the directory for autoloaded WADs/DEHs.
+// Creates the directory as necessary.
+//
+char *M_GetAutoloadDir(const char *iwadname)
+{
+    char *result;
+
+    if (autoload_path == NULL || strlen(autoload_path) == 0)
+    {
+        char *prefdir;
+        prefdir = SDL_GetPrefPath("", PACKAGE_TARNAME);
+        autoload_path = M_StringJoin(prefdir, "autoload", NULL);
+        SDL_free(prefdir);
+    }
+
+    M_MakeDirectory(autoload_path);
+
+    result = M_StringJoin(autoload_path, DIR_SEPARATOR_S, iwadname, NULL);
+    M_MakeDirectory(result);
+
+    // TODO: Add README file
+
+    return result;
 }
 

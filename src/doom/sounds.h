@@ -62,6 +62,27 @@ typedef enum
     mus_e3m7,
     mus_e3m8,
     mus_e3m9,
+    // [crispy] support dedicated music tracks for the 4th episode
+    mus_e4m1,
+    mus_e4m2,
+    mus_e4m3,
+    mus_e4m4,
+    mus_e4m5,
+    mus_e4m6,
+    mus_e4m7,
+    mus_e4m8,
+    mus_e4m9,
+    // [crispy] Sigil
+    mus_e5m1,
+    mus_e5m2,
+    mus_e5m3,
+    mus_e5m4,
+    mus_e5m5,
+    mus_e5m6,
+    mus_e5m7,
+    mus_e5m8,
+    mus_e5m9,
+    mus_sigint,
     mus_inter,
     mus_intro,
     mus_bunny,
@@ -102,7 +123,8 @@ typedef enum
     mus_read_m,
     mus_dm2ttl,
     mus_dm2int,
-    NUMMUSIC
+    NUMMUSIC,
+    mus_musinfo
 } musicenum_t;
 
 
@@ -221,6 +243,14 @@ typedef enum
     sfx_skesit,
     sfx_skeatk,
     sfx_radio,
+    // [crispy] additional BOOM and MBF states, sprites and code pointers
+    sfx_dgsit,
+    sfx_dgatk,
+    sfx_dgact,
+    sfx_dgdth,
+    sfx_dgpain,
+    // [crispy] play DSSECRET if available
+    sfx_secret,
     NUMSFX
 } sfxenum_t;
 

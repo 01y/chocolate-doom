@@ -187,6 +187,10 @@ P_TeleportMove
     thing->x = x;
     thing->y = y;
 
+    // [AM] Don't interpolate mobjs that pass
+    //      through teleporters
+    thing->interp = false;
+
     P_SetThingPosition (thing);
 	
     return true;
@@ -262,6 +266,9 @@ boolean PIT_CheckLine (line_t* ld)
         // fraggle: spechits overrun emulation code from prboom-plus
         if (numspechit > MAXSPECIALCROSS_ORIGINAL)
         {
+            // [crispy] print a warning
+            if (numspechit == MAXSPECIALCROSS_ORIGINAL + 1)
+                fprintf(stderr, "PIT_CheckLine: Triggered SPECHITS overflow!\n");
             SpechitOverrun(ld);
         }
     }
@@ -276,6 +283,7 @@ boolean PIT_CheckThing (mobj_t* thing)
 {
     fixed_t		blockdist;
     boolean		solid;
+    boolean		unblocking = false;
     int			damage;
 		
     if (!(thing->flags & (MF_SOLID|MF_SPECIAL|MF_SHOOTABLE) ))
@@ -297,6 +305,15 @@ boolean PIT_CheckThing (mobj_t* thing)
     // check for skulls slamming into things
     if (tmthing->flags & MF_SKULLFLY)
     {
+	// [crispy] check if attacking skull flies over player
+	if (critical->overunder && thing->player)
+	{
+	    if (tmthing->z > thing->z + thing->height)
+	    {
+		return true;
+	    }
+	}
+
 	damage = ((P_Random()%8)+1)*tmthing->info->damage;
 	
 	P_DamageMobj (thing, tmthing, tmthing, damage);
@@ -313,8 +330,12 @@ boolean PIT_CheckThing (mobj_t* thing)
     // missiles can hit other things
     if (tmthing->flags & MF_MISSILE)
     {
+	// [crispy] mobj or actual sprite height
+	const fixed_t thingheight = (tmthing->target && tmthing->target->player &&
+	                            critical->freeaim == FREEAIM_DIRECT) ?
+	                            thing->info->actualheight : thing->height;
 	// see if it went over / under
-	if (tmthing->z > thing->z + thing->height)
+	if (tmthing->z > thing->z + thingheight)
 	    return true;		// overhead
 	if (tmthing->z+tmthing->height < thing->z)
 	    return true;		// underneath
@@ -365,8 +386,79 @@ boolean PIT_CheckThing (mobj_t* thing)
 	}
 	return !solid;
     }
+
+	if (critical->overunder)
+	{
+		// [crispy] a solid hanging body will allow sufficiently small things underneath it
+		if (thing->flags & MF_SOLID && thing->flags & MF_SPAWNCEILING)
+		{
+			if (tmthing->z + tmthing->height <= thing->z)
+			{
+				if (thing->z < tmceilingz)
+				{
+					tmceilingz = thing->z;
+				}
+				return true;
+			}
+		}
+
+		// [crispy] allow players to walk over/under shootable objects
+		if (tmthing->player && thing->flags & MF_SHOOTABLE)
+		{
+			fixed_t newfloorz, newceilingz;
+			// [crispy] allow the usual 24 units step-up even across monsters' heads,
+			// only if the current height has not been reached by "low" jumping
+			fixed_t step_up = tmthing->player->jumpTics > 7 ? 0 : 24*FRACUNIT;
+
+			if (tmthing->z + step_up >= thing->z + thing->height)
+			{
+				// player walks over object
+				if ((newfloorz = thing->z + thing->height) > tmfloorz)
+				{
+					tmfloorz = newfloorz;
+				}
+				if ((newceilingz = tmthing->z) < thing->ceilingz)
+				{
+					thing->ceilingz = newceilingz;
+				}
+				return true;
+			}
+			else
+			if (tmthing->z + tmthing->height <= thing->z)
+			{
+				// player walks underneath object
+				if ((newceilingz = thing->z) < tmceilingz)
+				{
+					tmceilingz = newceilingz;
+				}
+				if ((newfloorz = tmthing->z + tmthing->height) > thing->floorz)
+				{
+					thing->floorz = newfloorz;
+				}
+				return true;
+			}
+
+			// [crispy] check if things are stuck and allow them to move further apart
+			// taken from doomretro/src/p_map.c:319-332
+			if (tmx == tmthing->x && tmy == tmthing->y)
+			{
+				unblocking = true;
+			}
+			else
+			{
+				fixed_t newdist = P_AproxDistance(thing->x - tmx, thing->y - tmy);
+				fixed_t olddist = P_AproxDistance(thing->x - tmthing->x, thing->y - tmthing->y);
+
+				if (newdist > olddist)
+				{
+					unblocking = (tmthing->z < thing->z + thing->height
+					           && tmthing->z + tmthing->height > thing->z);
+				}
+			}
+		}
+	}
 	
-    return !(thing->flags & MF_SOLID);
+    return !(thing->flags & MF_SOLID) || unblocking;
 }
 
 
@@ -554,6 +646,7 @@ P_TryMove
 // the z will be set to the lowest value
 // and false will be returned.
 //
+static sector_t *movingsector;
 boolean P_ThingHeightClip (mobj_t* thing)
 {
     boolean		onfloor;
@@ -570,6 +663,13 @@ boolean P_ThingHeightClip (mobj_t* thing)
     {
 	// walking monsters rise and fall with the floor
 	thing->z = thing->floorz;
+	// [crispy] update player's viewz on sector move
+	if (thing->player && thing->subsector->sector == movingsector)
+	{
+	    extern void P_CalcHeight (player_t* player, boolean safe);
+
+	    P_CalcHeight (thing->player, true);
+	}
     }
     else
     {
@@ -834,6 +934,7 @@ fixed_t		aimslope;
 extern fixed_t	topslope;
 extern fixed_t	bottomslope;	
 
+extern degenmobj_t *laserspot;
 
 //
 // PTR_AimTraverse
@@ -940,12 +1041,15 @@ boolean PTR_ShootTraverse (intercept_t* in)
     fixed_t		dist;
     fixed_t		thingtopslope;
     fixed_t		thingbottomslope;
+    fixed_t		thingheight; // [crispy] mobj or actual sprite height
 		
     if (in->isaline)
     {
+	boolean safe = false;
 	li = in->d.line;
 	
-	if (li->special)
+	// [crispy] laser spot does not shoot any line
+	if (li->special && la_damage > INT_MIN)
 	    P_ShootSpecialLine (shootthing, li);
 
 	if ( !(li->flags & ML_TWOSIDED) )
@@ -1006,11 +1110,50 @@ boolean PTR_ShootTraverse (intercept_t* in)
 	    
 	    // it's a sky hack wall
 	    if	(li->backsector && li->backsector->ceilingpic == skyflatnum)
+	    {
+	      // [crispy] fix bullet puffs and laser spot not appearing in outdoor areas
+	      if (li->backsector->ceilingheight < z)
 		return false;		
+	      else
+		safe = true;
+	    }
+	}
+
+	// [crispy] check if the pullet puff's z-coordinate is below of above
+	// its spawning sector's floor or ceiling, respectively, and move its
+	// coordinates to the point where the trajectory hits the plane
+	if (aimslope)
+	{
+		const int lineside = P_PointOnLineSide(x, y, li);
+		int side;
+
+		if ((side = li->sidenum[lineside]) != NO_INDEX)
+		{
+			const sector_t *const sector = sides[side].sector;
+
+			if (z < sector->floorheight ||
+			    (z > sector->ceilingheight && sector->ceilingpic != skyflatnum))
+			{
+				z = BETWEEN(sector->floorheight, sector->ceilingheight, z);
+				frac = FixedDiv(z - shootz, FixedMul(aimslope, attackrange));
+				x = trace.x + FixedMul (trace.dx, frac);
+				y = trace.y + FixedMul (trace.dy, frac);
+			}
+		}
+	}
+
+	// [crispy] update laser spot position and return
+	if (la_damage == INT_MIN)
+	{
+	    laserspot->thinker.function.acv = (actionf_v) (1);
+	    laserspot->x = x;
+	    laserspot->y = y;
+	    laserspot->z = z;
+	    return false;
 	}
 
 	// Spawn bullet puffs.
-	P_SpawnPuff (x,y,z);
+	P_SpawnPuffSafe (x, y, z, safe);
 	
 	// don't go any farther
 	return false;	
@@ -1026,7 +1169,10 @@ boolean PTR_ShootTraverse (intercept_t* in)
 		
     // check angles to see if the thing can be aimed at
     dist = FixedMul (attackrange, in->frac);
-    thingtopslope = FixedDiv (th->z+th->height - shootz , dist);
+    // [crispy] mobj or actual sprite height
+    thingheight = (shootthing->player && critical->freeaim == FREEAIM_DIRECT) ?
+                  th->info->actualheight : th->height;
+    thingtopslope = FixedDiv (th->z+thingheight - shootz , dist);
 
     if (thingtopslope < aimslope)
 	return true;		// shot over the thing
@@ -1045,12 +1191,26 @@ boolean PTR_ShootTraverse (intercept_t* in)
     y = trace.y + FixedMul (trace.dy, frac);
     z = shootz + FixedMul (aimslope, FixedMul(frac, attackrange));
 
+    // [crispy] update laser spot position and return
+    if (la_damage == INT_MIN)
+    {
+	// [crispy] pass through Spectres
+	if (th->flags & MF_SHADOW)
+	    return true;
+
+	laserspot->thinker.function.acv = (actionf_v) (1);
+	laserspot->x = th->x;
+	laserspot->y = th->y;
+	laserspot->z = z;
+	return false;
+    }
+
     // Spawn bullet puffs or blod spots,
     // depending on target type.
     if (in->d.thing->flags & MF_NOBLOOD)
 	P_SpawnPuff (x,y,z);
     else
-	P_SpawnBlood (x,y,z, la_damage);
+	P_SpawnBlood (x,y,z, la_damage, th); // [crispy] pass thing type
 
     if (la_damage)
 	P_DamageMobj (th, shootthing, shootthing, la_damage);
@@ -1105,6 +1265,8 @@ P_AimLineAttack
 // P_LineAttack
 // If damage == 0, it is just a test trace
 // that will leave linetarget set.
+// [crispy] if damage == INT_MIN, it is a trace
+// to update the laser spot position
 //
 void
 P_LineAttack
@@ -1114,24 +1276,88 @@ P_LineAttack
   fixed_t	slope,
   int		damage )
 {
+    // [crispy] smooth laser spot movement with uncapped framerate
+    const fixed_t t1x = (damage == INT_MIN) ? viewx : t1->x;
+    const fixed_t t1y = (damage == INT_MIN) ? viewy : t1->y;
     fixed_t	x2;
     fixed_t	y2;
 	
     angle >>= ANGLETOFINESHIFT;
     shootthing = t1;
     la_damage = damage;
-    x2 = t1->x + (distance>>FRACBITS)*finecosine[angle];
-    y2 = t1->y + (distance>>FRACBITS)*finesine[angle];
-    shootz = t1->z + (t1->height>>1) + 8*FRACUNIT;
+    x2 = t1x + (distance>>FRACBITS)*finecosine[angle];
+    y2 = t1y + (distance>>FRACBITS)*finesine[angle];
+    shootz = (damage == INT_MIN) ? viewz : t1->z + (t1->height>>1) + 8*FRACUNIT;
     attackrange = distance;
     aimslope = slope;
 		
-    P_PathTraverse ( t1->x, t1->y,
+    P_PathTraverse ( t1x, t1y,
 		     x2, y2,
 		     PT_ADDLINES|PT_ADDTHINGS,
 		     PTR_ShootTraverse );
 }
  
+// [crispy] update laser spot position
+// call P_AimLineAttack() to check if a target is aimed at (linetarget)
+// then call P_LineAttack() with either aimslope or the passed slope
+void
+P_LineLaser
+( mobj_t*	t1,
+  angle_t	angle,
+  fixed_t	distance,
+  fixed_t	slope )
+{
+    fixed_t	lslope;
+
+    laserspot->thinker.function.acv = (actionf_v) (0);
+
+    // [crispy] intercepts overflow guard
+    crispy->crosshair |= CROSSHAIR_INTERCEPT;
+
+    // [crispy] set the linetarget pointer
+    lslope = P_AimLineAttack(t1, angle, distance);
+
+    if (critical->freeaim == FREEAIM_DIRECT)
+    {
+	lslope = slope;
+    }
+    else
+    {
+    // [crispy] increase accuracy
+    if (!linetarget)
+    {
+	angle_t an = angle;
+
+	an += 1<<26;
+	lslope = P_AimLineAttack(t1, an, distance);
+
+	if (!linetarget)
+	{
+	    an -= 2<<26;
+	    lslope = P_AimLineAttack(t1, an, distance);
+
+	    if (!linetarget && critical->freeaim == FREEAIM_BOTH)
+	    {
+		lslope = slope;
+	    }
+
+	}
+    }
+    }
+
+    if ((crispy->crosshair & ~CROSSHAIR_INTERCEPT) == CROSSHAIR_PROJECTED)
+    {
+	// [crispy] don't aim at Spectres
+	if (linetarget && !(linetarget->flags & MF_SHADOW) && (crispy->freeaim != FREEAIM_DIRECT))
+		P_LineAttack(t1, angle, distance, aimslope, INT_MIN);
+	else
+		// [crispy] double the auto aim distance
+		P_LineAttack(t1, angle, 2*distance, lslope, INT_MIN);
+    }
+
+    // [crispy] intercepts overflow guard
+    crispy->crosshair &= ~CROSSHAIR_INTERCEPT;
+}
 
 
 //
@@ -1315,11 +1541,17 @@ boolean PIT_ChangeSector (mobj_t*	thing)
     // crunch bodies to giblets
     if (thing->health <= 0)
     {
-	P_SetMobjState (thing, S_GIBS);
+	// [crispy] no blood, no giblets
+	// S_GIBS should be a "safe" state, and so is S_NULL
+	// TODO: Add a check for DEHACKED states
+	P_SetMobjState (thing, (thing->flags & MF_NOBLOOD) ? S_NULL : S_GIBS);
 
 	thing->flags &= ~MF_SOLID;
 	thing->height = 0;
 	thing->radius = 0;
+
+	// [crispy] connect giblet object with the crushed monster
+	thing->target = thing;
 
 	// keep checking
 	return true;		
@@ -1349,10 +1581,18 @@ boolean PIT_ChangeSector (mobj_t*	thing)
 	// spray blood in a random direction
 	mo = P_SpawnMobj (thing->x,
 			  thing->y,
-			  thing->z + thing->height/2, MT_BLOOD);
+			  // [crispy] Lost Souls and Barrels bleed Puffs
+			  thing->z + thing->height/2, (thing->flags & MF_NOBLOOD) ? MT_PUFF : MT_BLOOD);
 	
 	mo->momx = P_SubRandom() << 12;
 	mo->momy = P_SubRandom() << 12;
+
+	// [crispy] connect blood object with the monster that bleeds it
+	mo->target = thing;
+
+	// [crispy] Spectres bleed spectre blood
+	if (crispy->coloredblood)
+	    mo->flags |= (thing->flags & MF_SHADOW);
     }
 
     // keep checking (crush other things)	
@@ -1375,6 +1615,7 @@ P_ChangeSector
     nofit = false;
     crushchange = crunch;
 	
+    movingsector = sector;
     // re-check heights for all things near the moving sector
     for (x=sector->blockbox[BOXLEFT] ; x<= sector->blockbox[BOXRIGHT] ; x++)
 	for (y=sector->blockbox[BOXBOTTOM];y<= sector->blockbox[BOXTOP] ; y++)

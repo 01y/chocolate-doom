@@ -30,6 +30,8 @@
 // Data.
 #include "sounds.h"
 
+//e6y
+#define STAIRS_UNINITIALIZED_CRUSH_FIELD_VALUE 10
 
 //
 // FLOORS
@@ -50,6 +52,11 @@ T_MovePlane
     boolean	flag;
     fixed_t	lastpos;
 	
+    // [AM] Store old sector heights for interpolation.
+    sector->oldfloorheight = sector->floorheight;
+    sector->oldceilingheight = sector->ceilingheight;
+    sector->oldgametic = gametic;
+
     switch(floorOrCeiling)
     {
       case 0:
@@ -242,6 +249,74 @@ void T_MoveFloor(floormove_t* floor)
 	S_StartSound(&floor->sector->soundorg, sfx_pstop);
     }
 
+}
+
+// [crispy] easter egg: homage to an old friend (thinker)
+void T_MoveGoobers (floormove_t *floor)
+{
+    result_e res1, res2;
+
+    // [crispy] one thinker for the floors ...
+    res1 = T_MovePlane(floor->sector, 2 * FLOORSPEED, 0,
+                       true, 0, (floor->direction &  1) * 2 - 1);
+    // [crispy] ... and one for the ceilings
+    // * floordestheight is actually the ceiling destination height (either 0 or 128)
+    // * the 5th argument is "floorOrCeiling"
+    // * the actual direction is given by the second-lowest bit of the "direction" field
+    res2 = T_MovePlane(floor->sector, 2 * FLOORSPEED, floor->floordestheight,
+                       true, 1, (floor->direction >> 1) * 2 - 1);
+
+    if (!(leveltime & 7))
+    {
+	S_StartSound(&floor->sector->soundorg, sfx_stnmov);
+    }
+
+    // [crispy] remove thinker once both the sector's floor and ceiling
+    // have reached their respective destination heights
+    if ((res1 & res2) == pastdest)
+    {
+	floor->sector->specialdata = NULL;
+	P_RemoveThinker(&floor->thinker);
+
+	S_StartSound(&floor->sector->soundorg, sfx_pstop);
+    }
+}
+
+// [crispy] easter egg: homage to an old friend
+void EV_DoGoobers (void)
+{
+    int i;
+
+    for (i = 0; i < numsectors; i++)
+    {
+	sector_t* sec;
+	floormove_t* floor;
+
+	sec = &sectors[i];
+
+	// [crispy] remove thinker for sectors that are already moving
+	if (sec->specialdata)
+	{
+	    floor = sec->specialdata;
+	    P_RemoveThinker(&floor->thinker);
+	    sec->specialdata = NULL;
+	}
+
+	floor = Z_Malloc(sizeof(*floor), PU_LEVSPEC, 0);
+	P_AddThinker(&floor->thinker);
+	sec->specialdata = floor;
+	floor->thinker.function.acp1 = (actionf_p1) T_MoveGoobers;
+	floor->sector = sec;
+	// [crispy] actually destination ceilingheight here (destination floorheight is always 0),
+	// leave destination ceilingheight for untagged closed sectors (i.e. DR-type doors) at 0,
+	// for all others set to 128
+	floor->floordestheight = (!sec->tag &&
+	    sec->interpceilingheight == sec->interpfloorheight) ? 0 : 128 * FRACUNIT;
+	// [crispy] the lowest bit determines floor direction (i.e. 1 means "up" for floorheight < 0),
+	// the second-lowest bit determines ceiling direction (e.g. if ceiling height is below its destination height)
+	floor->direction = (sec->floorheight < 0) |
+	                   (sec->ceilingheight < floor->floordestheight) << 1;
+    }
 }
 
 //
@@ -495,7 +570,10 @@ EV_BuildStairs
 	floor->floordestheight = height;
 	// Initialize
 	floor->type = lowerFloor;
-	floor->crush = true;
+	// e6y
+	// Uninitialized crush field will not be equal to 0 or 1 (true)
+	// with high probability. So, initialize it with any other value
+	floor->crush = STAIRS_UNINITIALIZED_CRUSH_FIELD_VALUE;
 		
 	texture = sec->floorpic;
 	
@@ -541,7 +619,10 @@ EV_BuildStairs
 		floor->floordestheight = height;
 		// Initialize
 		floor->type = lowerFloor;
-		floor->crush = true;
+		// e6y
+		// Uninitialized crush field will not be equal to 0 or 1 (true)
+		// with high probability. So, initialize it with any other value
+		floor->crush = STAIRS_UNINITIALIZED_CRUSH_FIELD_VALUE;
 		ok = 1;
 		break;
 	    }

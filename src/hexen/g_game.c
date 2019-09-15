@@ -583,7 +583,8 @@ void G_BuildTiccmd(ticcmd_t *cmd, int maketic)
         testcontrols_mousespeed = 0;
     }
 
-    forward += mousey;
+    if (!novert)
+        forward += mousey;
     mousex = mousey = 0;
 
     if (forward > MaxPlayerMove[pClass])
@@ -2042,9 +2043,9 @@ void G_RecordDemo(skill_t skill, int numplayers, int episode, int map,
 ===================
 */
 
-char *defdemoname;
+static const char *defdemoname;
 
-void G_DeferedPlayDemo(char *name)
+void G_DeferedPlayDemo(const char *name)
 {
     defdemoname = name;
     gameaction = ga_playdemo;

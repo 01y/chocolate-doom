@@ -176,8 +176,8 @@ static int 	cheating = 0;
 static int 	leveljuststarted = 1; 	// kluge until AM_LevelInit() is called
 
 boolean    	automapactive = false;
-static int 	finit_width = SCREENWIDTH;
-static int 	finit_height = SCREENHEIGHT - 32;
+//static int 	finit_width = SCREENWIDTH;
+//static int 	finit_height = SCREENHEIGHT - (32 << crispy->hires);
 
 // location of window on screen
 static int 	f_x;
@@ -501,8 +501,8 @@ void AM_LevelInit(void)
     leveljuststarted = 0;
 
     f_x = f_y = 0;
-    f_w = finit_width;
-    f_h = finit_height;
+    f_w = SCREENWIDTH;//finit_width;
+    f_h = SCREENHEIGHT - (32 << crispy->hires);//finit_height;
 
     AM_clearMarks();
 
@@ -1380,7 +1380,7 @@ void AM_drawMarks(void)
             {
                 // villsa [STRIFE]
                 if(i >= mapmarknum)
-                    V_DrawPatch(fx, fy, marknums[i]);
+                    V_DrawPatch(fx >> crispy->hires, fy >> crispy->hires, marknums[i]);
             }
         }
     }

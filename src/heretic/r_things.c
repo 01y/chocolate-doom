@@ -45,8 +45,8 @@ fixed_t pspritescale, pspriteiscale;
 lighttable_t **spritelights;
 
 // constant arrays used for psprite clipping and initializing clipping
-short negonearray[SCREENWIDTH];
-short screenheightarray[SCREENWIDTH];
+int negonearray[MAXWIDTH];       // [crispy] 32-bit integer math
+int screenheightarray[MAXWIDTH]; // [crispy] 32-bit integer math
 
 /*
 ===============================================================================
@@ -141,9 +141,9 @@ void R_InstallSpriteLump(int lump, unsigned frame, unsigned rotation,
 =================
 */
 
-void R_InitSpriteDefs(char **namelist)
+void R_InitSpriteDefs(const char **namelist)
 {
-    char **check;
+    const char **check;
     int i, l, frame, rotation;
     int start, end;
 
@@ -242,8 +242,9 @@ void R_InitSpriteDefs(char **namelist)
 ===============================================================================
 */
 
-vissprite_t vissprites[MAXVISSPRITES], *vissprite_p;
+vissprite_t *vissprites = NULL, *vissprite_p;
 int newvissprite;
+static int numvissprites;
 
 
 /*
@@ -255,7 +256,7 @@ int newvissprite;
 ===================
 */
 
-void R_InitSprites(char **namelist)
+void R_InitSprites(const char **namelist)
 {
     int i;
 
@@ -295,8 +296,31 @@ vissprite_t overflowsprite;
 
 vissprite_t *R_NewVisSprite(void)
 {
-    if (vissprite_p == &vissprites[MAXVISSPRITES])
+    // [crispy] remove MAXVISSPRITE limit
+    if (vissprite_p == &vissprites[numvissprites])
+    {
+	static int cap;
+	int numvissprites_old = numvissprites;
+
+	// [crispy] cap MAXVISSPRITES limit at 4096
+	if (!cap && numvissprites == 32 * MAXVISSPRITES)
+	{
+	    fprintf(stderr, "R_NewVisSprite: MAXVISSPRITES limit capped at %d.\n", numvissprites);
+	    cap++;
+	}
+
+	if (cap)
         return &overflowsprite;
+
+	numvissprites = numvissprites ? 2 * numvissprites : MAXVISSPRITES;
+	vissprites = I_Realloc(vissprites, numvissprites * sizeof(*vissprites));
+	memset(vissprites + numvissprites_old, 0, (numvissprites - numvissprites_old) * sizeof(*vissprites));
+
+	vissprite_p = vissprites + numvissprites_old;
+
+	if (numvissprites_old)
+	    fprintf(stderr, "R_NewVisSprite: Hit MAXVISSPRITES limit at %d, raised to %d.\n", numvissprites_old, numvissprites);
+    }
     vissprite_p++;
     return vissprite_p - 1;
 }
@@ -311,8 +335,8 @@ vissprite_t *R_NewVisSprite(void)
 ================
 */
 
-short *mfloorclip;
-short *mceilingclip;
+int *mfloorclip;   // [crispy] 32-bit integer math
+int *mceilingclip; // [crispy] 32-bit integer math
 fixed_t spryscale;
 fixed_t sprtopscreen;
 fixed_t sprbotscreen;
@@ -323,6 +347,7 @@ void R_DrawMaskedColumn(column_t * column, signed int baseclip)
     fixed_t basetexturemid;
 
     basetexturemid = dc_texturemid;
+    dc_texheight = 0;
 
     for (; column->topdelta != 0xff;)
     {
@@ -590,7 +615,7 @@ void R_ProjectSprite(mobj_t * thing)
         vis->colormap = colormaps;      // full bright
     else
     {                           // diminished light
-        index = xscale >> (LIGHTSCALESHIFT - detailshift);
+        index = xscale >> (LIGHTSCALESHIFT - detailshift + crispy->hires);
         if (index >= MAXLIGHTSCALE)
             index = MAXLIGHTSCALE - 1;
         vis->colormap = spritelights[index];
@@ -714,7 +739,7 @@ void R_DrawPSprite(pspdef_t * psp)
     vis->mobjflags = 0;
     vis->psprite = true;
     vis->texturemid =
-        (BASEYCENTER << FRACBITS) + FRACUNIT / 2 - (psp->sy -
+        (BASEYCENTER << FRACBITS) /* + FRACUNIT / 2 */ - (psp->sy -
                                                     spritetopoffset[lump]);
     if (viewheight == SCREENHEIGHT)
     {
@@ -874,7 +899,7 @@ void R_SortVisSprites(void)
 void R_DrawSprite(vissprite_t * spr)
 {
     drawseg_t *ds;
-    short clipbot[SCREENWIDTH], cliptop[SCREENWIDTH];
+    int clipbot[MAXWIDTH], cliptop[MAXWIDTH]; // [crispy] 32-bit integer math
     int x, r1, r2;
     fixed_t scale, lowscale;
     int silhouette;
@@ -1006,7 +1031,7 @@ void R_DrawMasked(void)
 //
 // Added for the sideviewing with an external device
     if (viewangleoffset <= 1024 << ANGLETOFINESHIFT || viewangleoffset >=
-        -1024 << ANGLETOFINESHIFT)
+        -(1024 << ANGLETOFINESHIFT))
     {                           // don't draw on side views
         R_DrawPlayerSprites();
     }

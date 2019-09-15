@@ -120,6 +120,8 @@ void T_VerticalDoor (vldoor_t* door)
 	      case vld_blazeClose:
 		door->sector->specialdata = NULL;
 		P_RemoveThinker (&door->thinker);  // unlink and free
+		// [crispy] fix "fast doors make two closing sounds"
+		if (!crispy->soundfix)
 		S_StartSound(&door->sector->soundorg, sfx_bdcls);
 		break;
 		
@@ -146,6 +148,15 @@ void T_VerticalDoor (vldoor_t* door)
 	      case vld_close:		// DO NOT GO BACK UP!
 		break;
 		
+	      // [crispy] fix "fast doors reopening with wrong sound"
+	      case vld_blazeRaise:
+		if (crispy->soundfix)
+		{
+		door->direction = 1;
+		S_StartSound(&door->sector->soundorg, sfx_bdopn);
+		break;
+		}
+
 	      default:
 		door->direction = 1;
 		S_StartSound(&door->sector->soundorg, sfx_doropn);
@@ -214,7 +225,9 @@ EV_DoLockedDoor
 	if (!p->cards[it_bluecard] && !p->cards[it_blueskull])
 	{
 	    p->message = DEH_String(PD_BLUEO);
-	    S_StartSound(NULL,sfx_oof);
+	    S_StartSound(crispy->soundfix ? p->mo : NULL,sfx_oof);
+	    // [crispy] blinking key or skull in the status bar
+	    p->tryopen[it_bluecard] = KEYBLINKTICS;
 	    return 0;
 	}
 	break;
@@ -226,7 +239,9 @@ EV_DoLockedDoor
 	if (!p->cards[it_redcard] && !p->cards[it_redskull])
 	{
 	    p->message = DEH_String(PD_REDO);
-	    S_StartSound(NULL,sfx_oof);
+	    S_StartSound(crispy->soundfix ? p->mo : NULL,sfx_oof);
+	    // [crispy] blinking key or skull in the status bar
+	    p->tryopen[it_redcard] = KEYBLINKTICS;
 	    return 0;
 	}
 	break;
@@ -239,7 +254,9 @@ EV_DoLockedDoor
 	    !p->cards[it_yellowskull])
 	{
 	    p->message = DEH_String(PD_YELLOWO);
-	    S_StartSound(NULL,sfx_oof);
+	    S_StartSound(crispy->soundfix ? p->mo : NULL,sfx_oof);
+	    // [crispy] blinking key or skull in the status bar
+	    p->tryopen[it_yellowcard] = KEYBLINKTICS;
 	    return 0;
 	}
 	break;	
@@ -287,6 +304,8 @@ EV_DoDoor
 	    door->topheight -= 4*FRACUNIT;
 	    door->direction = -1;
 	    door->speed = VDOORSPEED * 4;
+	    // [crispy] fix door-closing sound playing, even when door is already closed (repeatable walkover trigger)
+	    if (door->sector->ceilingheight - door->sector->floorheight > 0 || !crispy->soundfix)
 	    S_StartSound(&door->sector->soundorg, sfx_bdcls);
 	    break;
 	    
@@ -294,12 +313,16 @@ EV_DoDoor
 	    door->topheight = P_FindLowestCeilingSurrounding(sec);
 	    door->topheight -= 4*FRACUNIT;
 	    door->direction = -1;
+	    // [crispy] fix door-closing sound playing, even when door is already closed (repeatable walkover trigger)
+	    if (door->sector->ceilingheight - door->sector->floorheight > 0 || !crispy->soundfix)
 	    S_StartSound(&door->sector->soundorg, sfx_dorcls);
 	    break;
 	    
 	  case vld_close30ThenOpen:
 	    door->topheight = sec->ceilingheight;
 	    door->direction = -1;
+	    // [crispy] fix door-closing sound playing, even when door is already closed (repeatable walkover trigger)
+	    if (door->sector->ceilingheight - door->sector->floorheight > 0 || !crispy->soundfix)
 	    S_StartSound(&door->sector->soundorg, sfx_dorcls);
 	    break;
 	    
@@ -359,7 +382,9 @@ EV_VerticalDoor
 	if (!player->cards[it_bluecard] && !player->cards[it_blueskull])
 	{
 	    player->message = DEH_String(PD_BLUEK);
-	    S_StartSound(NULL,sfx_oof);
+	    S_StartSound(crispy->soundfix ? player->mo : NULL,sfx_oof);
+	    // [crispy] blinking key or skull in the status bar
+	    player->tryopen[it_bluecard] = KEYBLINKTICS;
 	    return;
 	}
 	break;
@@ -373,7 +398,9 @@ EV_VerticalDoor
 	    !player->cards[it_yellowskull])
 	{
 	    player->message = DEH_String(PD_YELLOWK);
-	    S_StartSound(NULL,sfx_oof);
+	    S_StartSound(crispy->soundfix ? player->mo : NULL,sfx_oof);
+	    // [crispy] blinking key or skull in the status bar
+	    player->tryopen[it_yellowcard] = KEYBLINKTICS;
 	    return;
 	}
 	break;
@@ -386,7 +413,9 @@ EV_VerticalDoor
 	if (!player->cards[it_redcard] && !player->cards[it_redskull])
 	{
 	    player->message = DEH_String(PD_REDK);
-	    S_StartSound(NULL,sfx_oof);
+	    S_StartSound(crispy->soundfix ? player->mo : NULL,sfx_oof);
+	    // [crispy] blinking key or skull in the status bar
+	    player->tryopen[it_redcard] = KEYBLINKTICS;
 	    return;
 	}
 	break;
@@ -394,9 +423,11 @@ EV_VerticalDoor
 	
     // if the sector has an active thinker, use it
 
-    if (line->sidenum[side^1] == -1)
+    if (line->sidenum[side^1] == NO_INDEX)
     {
-        I_Error("EV_VerticalDoor: DR special type on 1-sided linedef");
+        // [crispy] do not crash if the wrong side of the door is pushed
+        fprintf(stderr, "EV_VerticalDoor: DR special type on 1-sided linedef\n");
+        return;
     }
 
     sec = sides[ line->sidenum[side^1]] .sector;
@@ -412,7 +443,12 @@ EV_VerticalDoor
 	  case	28:
 	  case	117:
 	    if (door->direction == -1)
+	    {
 		door->direction = 1;	// go back up
+		// [crispy] play sound effect when the door is opened again while going down
+		if (crispy->soundfix && door->thinker.function.acp1 == (actionf_p1) T_VerticalDoor)
+		S_StartSound(&door->sector->soundorg, line->special == 117 ? sfx_bdopn : sfx_doropn);
+	    }
 	    else
 	    {
 		if (!thing->player)
@@ -425,6 +461,9 @@ EV_VerticalDoor
                 if (door->thinker.function.acp1 == (actionf_p1) T_VerticalDoor)
                 {
                     door->direction = -1;	// start going down immediately
+                    // [crispy] play sound effect when the door is closed manually
+                    if (crispy->soundfix)
+                    S_StartSound(&door->sector->soundorg, line->special == 117 ? sfx_bdcls : sfx_dorcls);
                 }
                 else if (door->thinker.function.acp1 == (actionf_p1) T_PlatRaise)
                 {

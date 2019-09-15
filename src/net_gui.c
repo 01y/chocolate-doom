@@ -235,7 +235,7 @@ static void CheckMasterStatus(void)
     }
 }
 
-static void PrintSHA1Digest(char *s, byte *digest)
+static void PrintSHA1Digest(const char *s, const byte *digest)
 {
     unsigned int i;
 
@@ -400,6 +400,13 @@ void NET_WaitForLaunch(void)
         exit(-1);
     }
 
+    TXT_SetColor(TXT_COLOR_BLUE, 0x04, 0x14, 0x40); // Romero's "funky blue" color
+
+    // [crispy] Crispy colors for Crispy Network GUI
+    TXT_SetColor(TXT_COLOR_BRIGHT_GREEN, 249, 227, 0);  // 0xF9, 0xE3, 0x00
+    TXT_SetColor(TXT_COLOR_CYAN, 220, 153, 0);          // 0xDC, 0x99, 0x00
+    TXT_SetColor(TXT_COLOR_BRIGHT_CYAN, 76, 160, 223);  // 0x4C, 0xA0, 0xDF
+    
     I_InitWindowIcon();
 
     ParseCommandLineArgs();

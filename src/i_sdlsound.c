@@ -43,7 +43,7 @@
 
 #define LOW_PASS_FILTER
 //#define DEBUG_DUMP_WAVS
-#define NUM_CHANNELS 16
+#define NUM_CHANNELS 16*2 // [crispy] support up to 32 sound channels
 
 typedef struct allocated_sound_s allocated_sound_t;
 
@@ -77,7 +77,10 @@ static allocated_sound_t *allocated_sounds_head = NULL;
 static allocated_sound_t *allocated_sounds_tail = NULL;
 static int allocated_sounds_size = 0;
 
-int use_libsamplerate = 0;
+// [crispy] values 3 and higher might reproduce DOOM.EXE more accurately,
+// but 1 is closer to "use_libsamplerate = 0" which is the default in Choco
+// and causes only a short delay at startup
+int use_libsamplerate = 1;
 
 // Scale factor used when converting libsamplerate floating point numbers
 // to integers. Too high means the sounds can clip; too low means they
@@ -885,7 +888,8 @@ static int I_SDL_GetSfxLumpNum(sfxinfo_t *sfx)
 
     GetSfxLumpName(sfx, namebuf, sizeof(namebuf));
 
-    return W_GetNumForName(namebuf);
+     // [crispy] make missing sounds non-fatal
+    return W_CheckNumForName(namebuf);
 }
 
 static void I_SDL_UpdateSoundParams(int handle, int vol, int sep)

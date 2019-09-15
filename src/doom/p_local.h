@@ -24,6 +24,8 @@
 #include "r_local.h"
 #endif
 
+#define TOCENTER                -8
+#define AFLAG_JUMP              0x80
 #define FLOATSPEED		(FRACUNIT*4)
 
 
@@ -83,6 +85,8 @@ void P_DropWeapon (player_t* player);
 //
 // P_USER
 //
+#define MLOOKUNIT	8
+#define PLAYER_SLOPE(a)	((((a)->lookdir / MLOOKUNIT) << FRACBITS) / 173)
 void	P_PlayerThink (player_t* player);
 
 
@@ -114,12 +118,14 @@ void 	P_RemoveMobj (mobj_t* th);
 mobj_t* P_SubstNullMobj (mobj_t* th);
 boolean	P_SetMobjState (mobj_t* mobj, statenum_t state);
 void 	P_MobjThinker (mobj_t* mobj);
+mobj_t *Crispy_PlayerSO (int p); // [crispy] weapon sound sources
 
 void	P_SpawnPuff (fixed_t x, fixed_t y, fixed_t z);
-void 	P_SpawnBlood (fixed_t x, fixed_t y, fixed_t z, int damage);
+void 	P_SpawnBlood (fixed_t x, fixed_t y, fixed_t z, int damage, mobj_t* target);
 mobj_t* P_SpawnMissile (mobj_t* source, mobj_t* dest, mobjtype_t type);
 void	P_SpawnPlayerMissile (mobj_t* source, mobjtype_t type);
 
+void	P_SpawnPuffSafe (fixed_t x, fixed_t y, fixed_t z, boolean safe);
 
 //
 // P_ENEMY
@@ -154,7 +160,7 @@ typedef struct
 #define MAXINTERCEPTS_ORIGINAL 128
 #define MAXINTERCEPTS          (MAXINTERCEPTS_ORIGINAL + 61)
 
-extern intercept_t	intercepts[MAXINTERCEPTS];
+//extern intercept_t	intercepts[MAXINTERCEPTS]; // [crispy] remove INTERCEPTS limit
 extern intercept_t*	intercept_p;
 
 typedef boolean (*traverser_t) (intercept_t *in);
@@ -259,15 +265,21 @@ P_RadiusAttack
 // P_SETUP
 //
 extern byte*		rejectmatrix;	// for fast sight rejection
-extern short*		blockmaplump;	// offsets in blockmap are from here
-extern short*		blockmap;
+extern int32_t*	blockmaplump;	// offsets in blockmap are from here // [crispy] BLOCKMAP limit
+extern int32_t*	blockmap; // [crispy] BLOCKMAP limit
 extern int		bmapwidth;
 extern int		bmapheight;	// in mapblocks
 extern fixed_t		bmaporgx;
 extern fixed_t		bmaporgy;	// origin of block map
 extern mobj_t**		blocklinks;	// for thing chains
 
+// [crispy] factor out map lump name and number finding into a separate function
+extern int P_GetNumForMap (int episode, int map, boolean critical);
 
+// [crispy] blinking key or skull in the status bar
+#define KEYBLINKMASK 0x8
+#define KEYBLINKTICS (7*KEYBLINKMASK)
+extern int st_keyorskull[3];
 
 //
 // P_INTER

@@ -67,11 +67,13 @@
 
 #define PRINTF_ATTR(fmt, first) __attribute__((format(printf, fmt, first)))
 #define PRINTF_ARG_ATTR(x) __attribute__((format_arg(x)))
+#define NORETURN __attribute__((noreturn))
 
 #else
 #define PACKEDATTR
 #define PRINTF_ATTR(fmt, first)
 #define PRINTF_ARG_ATTR(x)
+#define NORETURN
 #endif
 
 #ifdef __WATCOMC__
@@ -109,8 +111,13 @@ typedef enum
 #endif
 
 typedef uint8_t byte;
+#ifndef CRISPY_TRUECOLOR
 typedef uint8_t pixel_t;
 typedef int16_t dpixel_t;
+#else
+typedef uint32_t pixel_t;
+typedef int64_t dpixel_t;
+#endif
 
 #include <limits.h>
 

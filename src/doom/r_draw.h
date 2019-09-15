@@ -23,12 +23,14 @@
 
 
 
-extern lighttable_t*	dc_colormap;
+extern lighttable_t*	dc_colormap[2];
 extern int		dc_x;
 extern int		dc_yl;
 extern int		dc_yh;
 extern fixed_t		dc_iscale;
 extern fixed_t		dc_texturemid;
+extern int		dc_texheight;
+extern byte*		dc_brightmap;
 
 // first pixel in a column
 extern byte*		dc_source;		
@@ -44,11 +46,18 @@ void 	R_DrawColumnLow (void);
 void 	R_DrawFuzzColumn (void);
 void 	R_DrawFuzzColumnLow (void);
 
+// [crispy] draw fuzz effect independent of rendering frame rate
+void R_SetFuzzPosTic (void);
+void R_SetFuzzPosDraw (void);
+
 // Draw with color translation tables,
 //  for player sprite rendering,
 //  Green/Red/Blue/Indigo shirts.
 void	R_DrawTranslatedColumn (void);
 void	R_DrawTranslatedColumnLow (void);
+
+void	R_DrawTLColumn (void);
+void	R_DrawTLColumnLow (void);
 
 void
 R_VideoErase
@@ -59,7 +68,8 @@ extern int		ds_y;
 extern int		ds_x1;
 extern int		ds_x2;
 
-extern lighttable_t*	ds_colormap;
+extern lighttable_t*	ds_colormap[2];
+extern byte*		ds_brightmap;
 
 extern fixed_t		ds_xfrac;
 extern fixed_t		ds_yfrac;

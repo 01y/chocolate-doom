@@ -25,7 +25,7 @@
 
 #include "doomtype.h"
 
-boolean M_WriteFile(const char *name, void *source, int length);
+boolean M_WriteFile(const char *name, const void *source, int length);
 int M_ReadFile(const char *name, byte **buffer);
 void M_MakeDirectory(const char *dir);
 char *M_TempFile(const char *s);
@@ -33,6 +33,8 @@ boolean M_FileExists(const char *file);
 char *M_FileCaseExists(const char *file);
 long M_FileLength(FILE *handle);
 boolean M_StrToInt(const char *str, int *result);
+char *M_DirName(const char *path);
+const char *M_BaseName(const char *path);
 void M_ExtractFileBase(const char *path, char *dest);
 void M_ForceUppercase(char *text);
 void M_ForceLowercase(char *text);

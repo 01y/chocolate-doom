@@ -47,8 +47,8 @@ fixed_t pspritescale, pspriteiscale;
 lighttable_t **spritelights;
 
 // constant arrays used for psprite clipping and initializing clipping
-short negonearray[SCREENWIDTH];
-short screenheightarray[SCREENWIDTH];
+short negonearray[MAXWIDTH];
+short screenheightarray[MAXWIDTH];
 
 boolean LevelUseFullBright;
 /*
@@ -65,7 +65,7 @@ int numsprites;
 
 spriteframe_t sprtemp[30];
 int maxframe;
-char *spritename;
+static const char *spritename;
 
 
 
@@ -144,9 +144,9 @@ void R_InstallSpriteLump(int lump, unsigned frame, unsigned rotation,
 =================
 */
 
-void R_InitSpriteDefs(char **namelist)
+void R_InitSpriteDefs(const char **namelist)
 {
-    char **check;
+    const char **check;
     int i, l, frame, rotation;
     int start, end;
 
@@ -258,7 +258,7 @@ int newvissprite;
 ===================
 */
 
-void R_InitSprites(char **namelist)
+void R_InitSprites(const char **namelist)
 {
     int i;
 
@@ -607,7 +607,7 @@ void R_ProjectSprite(mobj_t * thing)
         vis->colormap = colormaps;      // full bright
     else
     {                           // diminished light
-        index = xscale >> (LIGHTSCALESHIFT - detailshift);
+        index = xscale >> (LIGHTSCALESHIFT - detailshift + crispy->hires);
         if (index >= MAXLIGHTSCALE)
             index = MAXLIGHTSCALE - 1;
         vis->colormap = spritelights[index];
@@ -727,7 +727,7 @@ void R_DrawPSprite(pspdef_t * psp)
     vis->mobjflags = 0;
     vis->class = 0;
     vis->psprite = true;
-    vis->texturemid = (BASEYCENTER << FRACBITS) + FRACUNIT / 2
+    vis->texturemid = (BASEYCENTER << FRACBITS) /* + FRACUNIT / 2 */
         - (psp->sy - spritetopoffset[lump]);
     if (viewheight == SCREENHEIGHT)
     {
@@ -901,7 +901,7 @@ void R_SortVisSprites(void)
 void R_DrawSprite(vissprite_t * spr)
 {
     drawseg_t *ds;
-    short clipbot[SCREENWIDTH], cliptop[SCREENWIDTH];
+    short clipbot[MAXWIDTH], cliptop[MAXWIDTH];
     int x, r1, r2;
     fixed_t scale, lowscale;
     int silhouette;
@@ -1033,7 +1033,7 @@ void R_DrawMasked(void)
 //
 // Added for the sideviewing with an external device
     if (viewangleoffset <= 1024 << ANGLETOFINESHIFT || viewangleoffset >=
-        -1024 << ANGLETOFINESHIFT)
+        -(1024 << ANGLETOFINESHIFT))
     {                           // don't draw on side views
         R_DrawPlayerSprites();
     }

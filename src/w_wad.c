@@ -181,7 +181,8 @@ wad_file_t *W_AddFile (const char *filename)
 
          // Vanilla Doom doesn't like WADs with more than 4046 lumps
          // https://www.doomworld.com/vb/post/1010985
-         if (!strncmp(header.identification,"PWAD",4) && header.numlumps > 4046)
+         // [crispy] disable PWAD lump number limit
+         if (!strncmp(header.identification,"PWAD",4) && header.numlumps > 4046 && false)
          {
                  W_CloseFile(wad_file);
                  I_Error ("Error: Vanilla limit for lumps in a WAD is 4046, "
@@ -321,6 +322,20 @@ lumpindex_t W_GetNumForName(const char *name)
     return i;
 }
 
+lumpindex_t W_CheckNumForNameFromTo(const char *name, int from, int to)
+{
+    lumpindex_t i;
+
+    for (i = from; i >= to; i--)
+    {
+        if (!strncasecmp(lumpinfo[i]->name, name, 8))
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
 
 //
 // W_LumpLength
@@ -622,3 +637,12 @@ void W_Reload(void)
     W_GenerateHashTable();
 }
 
+const char *W_WadNameForLump(const lumpinfo_t *lump)
+{
+	return M_BaseName(lump->wad_file->path);
+}
+
+boolean W_IsIWADLump(const lumpinfo_t *lump)
+{
+	return lump->wad_file == lumpinfo[0]->wad_file;
+}

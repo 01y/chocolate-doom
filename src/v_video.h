@@ -37,6 +37,8 @@
 extern int dirtybox[4];
 
 extern byte *tinttable;
+extern byte *dp_translation;
+extern boolean dp_translucent;
 
 // haleyjd 08/28/10: implemented for Strife support
 // haleyjd 08/28/10: Patch clipping callback, implemented to support Choco
@@ -61,10 +63,14 @@ void V_DrawAltTLPatch(int x, int y, patch_t * patch);
 void V_DrawShadowedPatch(int x, int y, patch_t *patch);
 void V_DrawXlaPatch(int x, int y, patch_t * patch);     // villsa [STRIFE]
 void V_DrawPatchDirect(int x, int y, patch_t *patch);
+void V_DrawPatchShadow1(int x, int y, patch_t *patch);
+void V_DrawPatchShadow2(int x, int y, patch_t *patch);
+void V_DrawPatchFullScreen(patch_t *patch, boolean flipped);
 
 // Draw a linear block of pixels into the view buffer.
 
 void V_DrawBlock(int x, int y, int width, int height, pixel_t *src);
+void V_DrawScaledBlock(int x, int y, int width, int height, pixel_t *src);
 
 void V_MarkRect(int x, int y, int width, int height);
 
@@ -72,6 +78,7 @@ void V_DrawFilledBox(int x, int y, int w, int h, int c);
 void V_DrawHorizLine(int x, int y, int w, int c);
 void V_DrawVertLine(int x, int y, int h, int c);
 void V_DrawBox(int x, int y, int w, int h, int c);
+void V_CopyScaledBuffer(pixel_t *dest, pixel_t *src, size_t size);
 
 // Draw a raw screen lump
 

@@ -28,11 +28,13 @@
 
 #include "deh_main.h"
 #include "i_system.h"
+#include "i_swap.h" // [crispy] LONG()
 #include "z_zone.h"
 #include "m_argv.h"
 #include "m_misc.h"
 #include "m_random.h"
 #include "w_wad.h"
+#include "r_swirl.h" // [crispy] R_InitDistortedFlats()
 
 #include "r_local.h"
 #include "p_local.h"
@@ -47,6 +49,7 @@
 // Data.
 #include "sounds.h"
 
+#define HUSTR_SECRETFOUND	"A secret is revealed!"
 
 //
 // Animating textures and planes
@@ -65,19 +68,22 @@ typedef struct
 //
 //      source animation definition
 //
-typedef struct
+// [crispy] change istexture type from int to char and
+// add PACKEDATTR for reading ANIMATED lumps from memory
+typedef PACKED_STRUCT (
 {
-    int 	istexture;	// if false, it is a flat
+    signed char	istexture;	// if false, it is a flat
     char	endname[9];
     char	startname[9];
     int		speed;
-} animdef_t;
+}) animdef_t;
 
 
 
 #define MAXANIMS                32
 
-extern anim_t	anims[MAXANIMS];
+// [crispy] remove MAXANIMS limit
+extern anim_t*	anims;
 extern anim_t*	lastanim;
 
 //
@@ -93,7 +99,8 @@ extern anim_t*	lastanim;
 //  and end entry, in the order found in
 //  the WAD file.
 //
-animdef_t		animdefs[] =
+// [crispy] add support for ANIMATED lumps
+animdef_t		animdefs_vanilla[] =
 {
     {false,	"NUKAGE3",	"NUKAGE1",	8},
     {false,	"FWATER4",	"FWATER1",	8},
@@ -126,14 +133,16 @@ animdef_t		animdefs[] =
     {-1,        "",             "",             0},
 };
 
-anim_t		anims[MAXANIMS];
+// [crispy] remove MAXANIMS limit
+anim_t*		anims;
 anim_t*		lastanim;
+static size_t	maxanims;
 
 
 //
 //      Animating line specials
 //
-#define MAXLINEANIMS            64
+#define MAXLINEANIMS            64*256
 
 extern  short	numlinespecials;
 extern  line_t*	linespeciallist[MAXLINEANIMS];
@@ -143,13 +152,35 @@ extern  line_t*	linespeciallist[MAXLINEANIMS];
 void P_InitPicAnims (void)
 {
     int		i;
+    boolean init_swirl = false;
 
+    // [crispy] add support for ANIMATED lumps
+    animdef_t *animdefs;
+    const boolean from_lump = (W_CheckNumForName("ANIMATED") != -1);
+
+    if (from_lump)
+    {
+	animdefs = W_CacheLumpName("ANIMATED", PU_STATIC);
+    }
+    else
+    {
+	animdefs = animdefs_vanilla;
+    }
     
     //	Init animation
     lastanim = anims;
     for (i=0 ; animdefs[i].istexture != -1 ; i++)
     {
         const char *startname, *endname;
+
+	// [crispy] remove MAXANIMS limit
+	if (lastanim >= anims + maxanims)
+	{
+	    size_t newmax = maxanims ? 2 * maxanims : MAXANIMS;
+	    anims = I_Realloc(anims, newmax * sizeof(*anims));
+	    lastanim = anims + maxanims;
+	    maxanims = newmax;
+	}
 
         startname = DEH_String(animdefs[i].startname);
         endname = DEH_String(animdefs[i].endname);
@@ -174,15 +205,30 @@ void P_InitPicAnims (void)
 
 	lastanim->istexture = animdefs[i].istexture;
 	lastanim->numpics = lastanim->picnum - lastanim->basepic + 1;
+	lastanim->speed = from_lump ? LONG(animdefs[i].speed) : animdefs[i].speed;
 
+	// [crispy] add support for SMMU swirling flats
+	if (lastanim->speed > 65535 || lastanim->numpics == 1)
+	{
+		init_swirl = true;
+	}
+	else
 	if (lastanim->numpics < 2)
 	    I_Error ("P_InitPicAnims: bad cycle from %s to %s",
 		     startname, endname);
 	
-	lastanim->speed = animdefs[i].speed;
 	lastanim++;
     }
 	
+    if (from_lump)
+    {
+	W_ReleaseLumpName("ANIMATED");
+    }
+
+    if (init_swirl)
+    {
+	R_InitDistortedFlats();
+    }
 }
 
 
@@ -337,7 +383,19 @@ P_FindNextHighestFloor
     line_t*     check;
     sector_t*   other;
     fixed_t     height = currentheight;
-    fixed_t     heightlist[MAX_ADJOINING_SECTORS + 2];
+    static fixed_t *heightlist = NULL;
+    static int heightlist_size = 0;
+
+    // [crispy] remove MAX_ADJOINING_SECTORS Vanilla limit
+    // from prboom-plus/src/p_spec.c:404-411
+    if (sec->linecount > heightlist_size)
+    {
+	do
+	{
+	    heightlist_size = heightlist_size ? 2 * heightlist_size : MAX_ADJOINING_SECTORS;
+	} while (sec->linecount > heightlist_size);
+	heightlist = I_Realloc(heightlist, heightlist_size * sizeof(*heightlist));
+    }
 
     for (i=0, h=0; i < sec->linecount; i++)
     {
@@ -357,8 +415,8 @@ P_FindNextHighestFloor
             else if (h == MAX_ADJOINING_SECTORS + 2)
             {
                 // Fatal overflow: game crashes at 22 sectors
-                I_Error("Sector with more than 22 adjoining sectors. "
-                        "Vanilla will crash here");
+                fprintf(stderr, "Sector with more than 22 adjoining sectors. "
+                        "Vanilla will crash here\n");
             }
 
             heightlist[h++] = other->floorheight;
@@ -447,6 +505,28 @@ P_FindSectorFromLineTag
 {
     int	i;
 	
+#if 0
+    // [crispy] linedefs without tags apply locally
+    if (crispy->singleplayer && !line->tag)
+    {
+    for (i=start+1;i<numsectors;i++)
+	if (&sectors[i] == line->backsector)
+	{
+	    const long linedef = line - lines;
+	    fprintf(stderr, "P_FindSectorFromLineTag: Linedef %ld without tag applied to sector %d\n", linedef, i);
+	    return i;
+	}
+    }
+    else
+#else
+    // [crispy] emit a warning for linedefs without tags
+    if (!line->tag)
+    {
+        const long linedef = line - lines;
+        fprintf(stderr, "P_FindSectorFromLineTag: Linedef %ld without tag\n", linedef);
+    }
+#endif
+
     for (i=start+1;i<numsectors;i++)
 	if (sectors[i].tag == line->tag)
 	    return i;
@@ -504,10 +584,20 @@ P_CrossSpecialLine
   int		side,
   mobj_t*	thing )
 {
-    line_t*	line;
+    return P_CrossSpecialLinePtr(&lines[linenum], side, thing);
+}
+
+// [crispy] more MBF code pointers
+void
+P_CrossSpecialLinePtr
+( line_t*	line,
+  int		side,
+  mobj_t*	thing )
+{
+//  line_t*	line;
     int		ok;
 
-    line = &lines[linenum];
+//  line = &lines[linenum];
     
     //	Triggers that other things can activate
     if (!thing->player)
@@ -1019,6 +1109,8 @@ P_ShootSpecialLine
 void P_PlayerInSpecialSector (player_t* player)
 {
     sector_t*	sector;
+    extern int showMessages;
+    static sector_t*	error;
 	
     sector = player->mo->subsector->sector;
 
@@ -1031,14 +1123,16 @@ void P_PlayerInSpecialSector (player_t* player)
     {
       case 5:
 	// HELLSLIME DAMAGE
-	if (!player->powers[pw_ironfeet])
+	// [crispy] no nukage damage with NOCLIP cheat
+	if (!player->powers[pw_ironfeet] && !(player->mo->flags & MF_NOCLIP))
 	    if (!(leveltime&0x1f))
 		P_DamageMobj (player->mo, NULL, NULL, 10);
 	break;
 	
       case 7:
 	// NUKAGE DAMAGE
-	if (!player->powers[pw_ironfeet])
+	// [crispy] no nukage damage with NOCLIP cheat
+	if (!player->powers[pw_ironfeet] && !(player->mo->flags & MF_NOCLIP))
 	    if (!(leveltime&0x1f))
 		P_DamageMobj (player->mo, NULL, NULL, 5);
 	break;
@@ -1047,8 +1141,9 @@ void P_PlayerInSpecialSector (player_t* player)
 	// SUPER HELLSLIME DAMAGE
       case 4:
 	// STROBE HURT
-	if (!player->powers[pw_ironfeet]
-	    || (P_Random()<5) )
+	// [crispy] no nukage damage with NOCLIP cheat
+	if ((!player->powers[pw_ironfeet]
+	    || (P_Random()<5) ) && !(player->mo->flags & MF_NOCLIP))
 	{
 	    if (!(leveltime&0x1f))
 		P_DamageMobj (player->mo, NULL, NULL, 20);
@@ -1058,6 +1153,22 @@ void P_PlayerInSpecialSector (player_t* player)
       case 9:
 	// SECRET SECTOR
 	player->secretcount++;
+	// [crispy] show centered "Secret Revealed!" message
+	if (showMessages && crispy->secretmessage && player == &players[consoleplayer])
+	{
+	    int sfx_id;
+	    static char str_count[32];
+
+	    M_snprintf(str_count, sizeof(str_count), "Secret %d of %d revealed!", player->secretcount, totalsecret);
+
+	    // [crispy] play DSSECRET if available
+	    sfx_id = I_GetSfxLumpNum(&S_sfx[sfx_secret]) != -1 ? sfx_secret : sfx_itmbk;
+
+	    player->centermessage = (crispy->secretmessage == SECRETMESSAGE_COUNT) ? str_count : HUSTR_SECRETFOUND;
+	    S_StartSound(NULL, sfx_id);
+	}
+	// [crispy] remember revealed secrets
+	sector->oldspecial = sector->special;
 	sector->special = 0;
 	break;
 			
@@ -1073,9 +1184,14 @@ void P_PlayerInSpecialSector (player_t* player)
 	break;
 			
       default:
-	I_Error ("P_PlayerInSpecialSector: "
-		 "unknown special %i",
+	// [crispy] ignore unknown special sectors
+	if (error != sector)
+	{
+	error = sector;
+	fprintf (stderr, "P_PlayerInSpecialSector: "
+		 "unknown special %i\n",
 		 sector->special);
+	}
 	break;
     };
 }
@@ -1115,7 +1231,15 @@ void P_UpdateSpecials (void)
 	    if (anim->istexture)
 		texturetranslation[i] = pic;
 	    else
+	    {
+		// [crispy] add support for SMMU swirling flats
+		if (anim->speed > 65535 || anim->numpics == 1)
+		{
+		    flattranslation[i] = -1;
+		}
+		else
 		flattranslation[i] = pic;
+	    }
 	}
     }
 
@@ -1128,14 +1252,24 @@ void P_UpdateSpecials (void)
 	{
 	  case 48:
 	    // EFFECT FIRSTCOL SCROLL +
-	    sides[line->sidenum[0]].textureoffset += FRACUNIT;
+	    // [crispy] smooth texture scrolling
+	    sides[line->sidenum[0]].basetextureoffset += FRACUNIT;
+	    sides[line->sidenum[0]].textureoffset =
+	    sides[line->sidenum[0]].basetextureoffset;
+	    break;
+	  case 85:
+	    // [JN] (Boom) Scroll Texture Right
+	    // [crispy] smooth texture scrolling
+	    sides[line->sidenum[0]].basetextureoffset -= FRACUNIT;
+	    sides[line->sidenum[0]].textureoffset =
+	    sides[line->sidenum[0]].basetextureoffset;
 	    break;
 	}
     }
 
     
     //	DO BUTTONS
-    for (i = 0; i < MAXBUTTONS; i++)
+    for (i = 0; i < maxbuttons; i++)
 	if (buttonlist[i].btimer)
 	{
 	    buttonlist[i].btimer--;
@@ -1158,12 +1292,52 @@ void P_UpdateSpecials (void)
 			buttonlist[i].btexture;
 		    break;
 		}
-		S_StartSound(&buttonlist[i].soundorg,sfx_swtchn);
+		// [crispy] & [JN] Logically proper sound behavior.
+		// Do not play second "sfx_swtchn" on two-sided linedefs that attached to special sectors,
+		// and always play second sound on single-sided linedefs.
+		if (crispy->soundfix)
+		{
+			if (!buttonlist[i].line->backsector || !buttonlist[i].line->backsector->specialdata)
+			{
+				S_StartSoundOnce(buttonlist[i].soundorg,sfx_swtchn);
+			}
+		}
+		else
+		{
+		S_StartSoundOnce(&buttonlist[i].soundorg,sfx_swtchn);
+		}
 		memset(&buttonlist[i],0,sizeof(button_t));
 	    }
 	}
+
+    // [crispy] draw fuzz effect independent of rendering frame rate
+    R_SetFuzzPosTic();
 }
 
+// [crispy] smooth texture scrolling
+void R_InterpolateTextureOffsets (void)
+{
+	if (crispy->uncapped && leveltime > oldleveltime)
+	{
+		int i;
+
+		for (i = 0; i < numlinespecials; i++)
+		{
+			const line_t *const line = linespeciallist[i];
+			side_t *const side = &sides[line->sidenum[0]];
+
+			if (line->special == 48)
+			{
+				side->textureoffset = side->basetextureoffset + fractionaltic;
+			}
+			else
+			if (line->special == 85)
+			{
+				side->textureoffset = side->basetextureoffset - fractionaltic;
+			}
+		}
+	}
+}
 
 //
 // Donut overrun emulation
@@ -1369,6 +1543,19 @@ int EV_DoDonut(line_t*	line)
 short		numlinespecials;
 line_t*		linespeciallist[MAXLINEANIMS];
 
+static unsigned int NumScrollers()
+{
+    unsigned int i, scrollers = 0;
+
+    for (i = 0; i < numlines; i++)
+    {
+        if (48 == lines[i].special)
+        {
+            scrollers++;
+        }
+    }
+    return scrollers;
+}
 
 // Parses command line parameters.
 void P_SpawnSpecials (void)
@@ -1461,14 +1648,31 @@ void P_SpawnSpecials (void)
 	switch(lines[i].special)
 	{
 	  case 48:
+	  case 85: // [crispy] [JN] (Boom) Scroll Texture Right
             if (numlinespecials >= MAXLINEANIMS)
             {
-                I_Error("Too many scrolling wall linedefs! "
-                        "(Vanilla limit is 64)");
+                I_Error("Too many scrolling wall linedefs (%d)! "
+                        "(Vanilla limit is 64)", NumScrollers());
             }
 	    // EFFECT FIRSTCOL SCROLL+
 	    linespeciallist[numlinespecials] = &lines[i];
 	    numlinespecials++;
+	    break;
+
+	  // [crispy] add support for MBF sky tranfers
+	  case 271:
+	  case 272:
+	    {
+		int secnum;
+
+		for (secnum = 0; secnum < numsectors; secnum++)
+		{
+		    if (sectors[secnum].tag == lines[i].tag)
+		    {
+			sectors[secnum].sky = i | PL_SKYFLAT;
+		    }
+		}
+	    }
 	    break;
 	}
     }
@@ -1481,7 +1685,7 @@ void P_SpawnSpecials (void)
     for (i = 0;i < MAXPLATS;i++)
 	activeplats[i] = NULL;
     
-    for (i = 0;i < MAXBUTTONS;i++)
+    for (i = 0;i < maxbuttons;i++)
 	memset(&buttonlist[i],0,sizeof(button_t));
 
     // UNUSED: no horizonal sliders.

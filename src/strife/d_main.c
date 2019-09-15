@@ -144,9 +144,9 @@ boolean         isdemoversion;
 char		wadfile[1024];          // primary wad file
 char		mapdir[1024];           // directory of development maps
 
-int             show_endoom = 1;
+int             show_endoom = 0;
 int             show_diskicon = 1;
-int             graphical_startup = 1;
+int             graphical_startup = 0;
 static boolean  using_text_startup;
 
 // If true, startup has completed and the main game loop has started.
@@ -257,13 +257,13 @@ void D_Display (void)
             break;
         if (automapactive)
             AM_Drawer ();
-        if (wipe || (viewheight != 200 && fullscreen) )
+        if (wipe || (viewheight != (200 <<crispy->hires) && fullscreen) )
             redrawsbar = true;
         // haleyjd 08/29/10: [STRIFE] Always redraw sbar if menu is/was active
         if (menuactivestate || (inhelpscreensstate && !inhelpscreens))
             redrawsbar = true;              // just put away the help screen
-        ST_Drawer (viewheight == 200, redrawsbar );
-        fullscreen = viewheight == 200;
+        ST_Drawer (viewheight == (200 << crispy->hires), redrawsbar );
+        fullscreen = viewheight == (200 << crispy->hires);
         break;
       
      // haleyjd 08/23/2010: [STRIFE] No intermission
@@ -304,7 +304,7 @@ void D_Display (void)
     }
 
     // see if the border needs to be updated to the screen
-    if (gamestate == GS_LEVEL && !automapactive && scaledviewwidth != 320)
+    if (gamestate == GS_LEVEL && !automapactive && scaledviewwidth != (320 << crispy->hires))
     {
         if (menuactive || menuactivestate || !viewactivestate)
         {
@@ -350,8 +350,8 @@ void D_Display (void)
         if (automapactive)
             y = 4;
         else
-            y = viewwindowy+4;
-        V_DrawPatchDirect(viewwindowx + (scaledviewwidth - 68) / 2, y,
+            y = (viewwindowy >> crispy->hires)+4;
+        V_DrawPatchDirect((viewwindowx >> crispy->hires) + ((scaledviewwidth >> crispy->hires) - 68) / 2, y,
                           W_CacheLumpName (DEH_String("M_PAUSE"), PU_CACHE));
     }
 
@@ -757,7 +757,7 @@ void D_QuitGame(void)
 // These are from the original source: some of them are perhaps
 // not used in any dehacked patches
 
-static char *banners[] =
+static const char *banners[] =
 {
     // strife1.wad:
 
@@ -855,10 +855,8 @@ void D_IdentifyVersion(void)
             voiceswad = M_SafeFilePath(iwadpath, "voices.wad");
             Z_Free(iwadpath);
 
-            if(!M_FileExists(voiceswad))
-                Z_Free(voiceswad);
-            else
-                name = voiceswad; // STRIFE-FIXME: memory leak!!
+            name = M_FileCaseExists(voiceswad);
+            Z_Free(voiceswad);
         }
 
         // not found? try global search paths
@@ -877,6 +875,7 @@ void D_IdentifyVersion(void)
         {
             // add it.
             D_AddFile(name);
+            free(name);
         }
     }
 }
@@ -958,7 +957,7 @@ static boolean D_AddFile(char *filename)
 // Some dehacked mods replace these.  These are only displayed if they are 
 // replaced by dehacked.
 // haleyjd 08/22/2010: [STRIFE] altered to match strings from binary
-static char *copyright_banners[] =
+static const char *copyright_banners[] =
 {
     "===========================================================================\n"
     "ATTENTION:  This version of STRIFE has extra files added to it.\n"
@@ -1004,8 +1003,8 @@ void PrintDehackedBanners(void)
 
 static struct 
 {
-    char *description;
-    char *cmdline;
+    const char *description;
+    const char *cmdline;
     GameVersion_t version;
 } gameversions[] = {
     { "Strife 1.2",          "1.2",       exe_strife_1_2  },
@@ -1146,7 +1145,7 @@ static void D_SetChar(char c)
 //
 // D_DrawText
 //
-static void D_DrawText(char *string, int bc, int fc)
+static void D_DrawText(const char *string, int bc, int fc)
 {
     int column;
     int row;
@@ -1198,8 +1197,8 @@ boolean D_PatchClipCallback(patch_t *patch, int x, int y)
 {
     // note that offsets were already accounted for in V_DrawPatch
     return (x >= 0 && y >= 0 
-            && x + SHORT(patch->width) <= SCREENWIDTH 
-            && y + SHORT(patch->height) <= SCREENHEIGHT);
+            && x + SHORT(patch->width) <= ORIGWIDTH 
+            && y + SHORT(patch->height) <= ORIGHEIGHT);
 }
 
 //
@@ -1256,7 +1255,7 @@ static void D_IntroBackground(void)
 
     // Draw a 95-pixel rect from STARTUP0 starting at y=57 to (0,41) on the
     // screen (this was a memcpy directly to 0xA3340 in low DOS memory)
-    V_DrawBlock(0, 41, 320, 95, rawgfx_startup0 + (320*57));
+    V_DrawScaledBlock(0, 41, 320, 95, rawgfx_startup0 + (320*57));
 }
 
 //
@@ -1393,7 +1392,7 @@ static void D_DrawIntroSequence(void)
         // Draw the robot
         // Blitted 48 bytes for 48 rows starting at 699534 + (320*robotpos)
         // 699534 - 0xA0000 == 44174, which % 320 == 14, / 320 == 138
-        V_DrawBlock(14, 138 + robotpos, 48, 48, rawgfx_startbot);
+        V_DrawScaledBlock(14, 138 + robotpos, 48, 48, rawgfx_startbot);
 
         // Draw the peasant
         // Blitted 32 bytes for 64 rows starting at 699142
@@ -1735,6 +1734,20 @@ void D_DoomMain (void)
     D_AddFile(iwadfile);
     W_CheckCorrectIWAD(strife);
     D_IdentifyVersion();
+
+    //!
+    // @category mod
+    //
+    // Disable auto-loading of .wad files.
+    //
+    if (!M_ParmExists("-noautoload"))
+    {
+        char *autoload_dir;
+        autoload_dir = M_GetAutoloadDir("strife1.wad");
+        DEH_AutoLoadPatches(autoload_dir);
+        W_AutoLoadWADs(autoload_dir);
+        free(autoload_dir);
+    }
 
     // Load dehacked patches specified on the command line.
     DEH_ParseCommandLine();

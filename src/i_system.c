@@ -49,8 +49,8 @@
 #include "w_wad.h"
 #include "z_zone.h"
 
-#define DEFAULT_RAM 16 /* MiB */
-#define MIN_RAM     4  /* MiB */
+#define DEFAULT_RAM 16*2 /* MiB [crispy] */
+#define MIN_RAM     4*4  /* MiB [crispy] */
 
 
 typedef struct atexit_listentry_s atexit_listentry_t;
@@ -129,6 +129,7 @@ byte *I_ZoneBase (int *size)
     byte *zonemem;
     int min_ram, default_ram;
     int p;
+    static int i = 1;
 
     //!
     // @category obscure
@@ -150,10 +151,19 @@ byte *I_ZoneBase (int *size)
         min_ram = MIN_RAM;
     }
 
-    zonemem = AutoAllocMemory(size, default_ram, min_ram);
+    // [crispy] do not allocate new zones ad infinitum
+    if (i > 8)
+    {
+        min_ram = default_ram + 1;
+    }
 
-    printf("zone memory: %p, %x allocated for zone\n", 
-           zonemem, *size);
+    zonemem = AutoAllocMemory(size, default_ram * i, min_ram * i);
+
+    // [crispy] if called again, allocate another zone twice as big
+    i *= 2;
+
+    printf("zone memory: %p, %d MiB allocated for zone\n",
+           zonemem, *size >> 20); // [crispy] human-understandable zone heap size
 
     return zonemem;
 }

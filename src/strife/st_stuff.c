@@ -201,7 +201,7 @@ static patch_t*         invsigil[5];      // sigil pieces
 static patch_t*         invarmor[2];      // armor icons
 
 // names for ammo patches
-static char *invammonames[NUMAMMO] =
+static const char *invammonames[NUMAMMO] =
 {
     "I_BLIT",
     "I_XQRL",
@@ -963,11 +963,13 @@ void ST_drawNumFontY2(int x, int y, int num)
 void ST_drawLine(int x, int y, int len, int color)
 {
     byte putcolor = (byte)(color);
-    byte *drawpos = I_VideoBuffer + y * SCREENWIDTH + x;
+    byte *drawpos = I_VideoBuffer + (y << crispy->hires) * SCREENWIDTH + (x << crispy->hires);
     int i = 0;
 
-    while(i < len)
+    while(i < (len << crispy->hires))
     {
+        if (crispy->hires)
+            *(drawpos + SCREENWIDTH) = putcolor;
         *drawpos++ = putcolor;
         ++i;
     }

@@ -32,17 +32,20 @@
 
 // Needs access to LFB (guess what).
 #include "v_video.h"
+#ifdef CRISPY_TRUECOLOR
+#include "v_trans.h"
+#endif
 
 // State.
 #include "doomstat.h"
 
 
 // ?
-#define MAXWIDTH			1120
-#define MAXHEIGHT			832
+//#define MAXWIDTH			1120
+//#define MAXHEIGHT			832
 
 // status bar height at bottom of screen
-#define SBARHEIGHT		32
+#define SBARHEIGHT		(32 << crispy->hires)
 
 //
 // All drawing to the view buffer is accomplished in this file.
@@ -79,12 +82,13 @@ static pixel_t *background_buffer = NULL;
 // R_DrawColumn
 // Source is the top of the column to scale.
 //
-lighttable_t*		dc_colormap; 
+lighttable_t*		dc_colormap[2]; // [crispy] brightmaps
 int			dc_x; 
 int			dc_yl; 
 int			dc_yh; 
 fixed_t			dc_iscale; 
 fixed_t			dc_texturemid;
+int			dc_texheight; // [crispy] Tutti-Frutti fix
 
 // first pixel in a column (possibly virtual) 
 byte*			dc_source;		
@@ -99,12 +103,16 @@ int			dccount;
 // Thus a special case loop for very fast rendering can
 //  be used. It has also been used with Wolfenstein 3D.
 // 
+// [crispy] replace R_DrawColumn() with Lee Killough's implementation
+// found in MBF to fix Tutti-Frutti, taken from mbfsrc/R_DRAW.C:99-1979
+
 void R_DrawColumn (void) 
 { 
     int			count; 
     pixel_t*		dest;
     fixed_t		frac;
     fixed_t		fracstep;	 
+    int			heightmask = dc_texheight - 1;
  
     count = dc_yh - dc_yl; 
 
@@ -132,16 +140,45 @@ void R_DrawColumn (void)
     // Inner loop that does the actual texture mapping,
     //  e.g. a DDA-lile scaling.
     // This is as fast as it gets.
+
+  // heightmask is the Tutti-Frutti fix -- killough
+  if (dc_texheight & heightmask) // not a power of 2 -- killough
+  {
+    heightmask++;
+    heightmask <<= FRACBITS;
+
+    if (frac < 0)
+	while ((frac += heightmask) < 0);
+    else
+	while (frac >= heightmask)
+	    frac -= heightmask;
+
+    do
+    {
+	// [crispy] brightmaps
+	const byte source = dc_source[frac>>FRACBITS];
+	*dest = dc_colormap[dc_brightmap[source]][source];
+
+	dest += SCREENWIDTH;
+	if ((frac += fracstep) >= heightmask)
+	    frac -= heightmask;
+    } while (count--);
+  }
+  else // texture height is a power of 2 -- killough
+  {
     do 
     {
 	// Re-map color indices from wall texture column
 	//  using a lighting/special effects LUT.
-	*dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
+	// [crispy] brightmaps
+	const byte source = dc_source[(frac>>FRACBITS)&heightmask];
+	*dest = dc_colormap[dc_brightmap[source]][source];
 	
 	dest += SCREENWIDTH; 
 	frac += fracstep;
 	
     } while (count--); 
+  }
 } 
 
 
@@ -208,11 +245,12 @@ void R_DrawColumn (void)
 void R_DrawColumnLow (void) 
 { 
     int			count; 
-    pixel_t*		dest;
+    pixel_t*		dest; 
     pixel_t*		dest2;
     fixed_t		frac;
     fixed_t		fracstep;	 
     int                 x;
+    int			heightmask = dc_texheight - 1;
  
     count = dc_yh - dc_yl; 
 
@@ -239,15 +277,46 @@ void R_DrawColumnLow (void)
     fracstep = dc_iscale; 
     frac = dc_texturemid + (dc_yl-centery)*fracstep;
     
+  // heightmask is the Tutti-Frutti fix -- killough
+  if (dc_texheight & heightmask) // not a power of 2 -- killough
+  {
+    heightmask++;
+    heightmask <<= FRACBITS;
+
+    if (frac < 0)
+	while ((frac += heightmask) < 0);
+    else
+	while (frac >= heightmask)
+	    frac -= heightmask;
+
+    do
+    {
+	// [crispy] brightmaps
+	const byte source = dc_source[frac>>FRACBITS];
+	*dest2 = *dest = dc_colormap[dc_brightmap[source]][source];
+
+	dest += SCREENWIDTH;
+	dest2 += SCREENWIDTH;
+
+	if ((frac += fracstep) >= heightmask)
+	    frac -= heightmask;
+    } while (count--);
+  }
+  else // texture height is a power of 2 -- killough
+  {
     do 
     {
 	// Hack. Does not work corretly.
-	*dest2 = *dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
+	// [crispy] brightmaps
+	const byte source = dc_source[(frac>>FRACBITS)&heightmask];
+	*dest2 = *dest = dc_colormap[dc_brightmap[source]][source];
 	dest += SCREENWIDTH;
 	dest2 += SCREENWIDTH;
+
 	frac += fracstep; 
 
     } while (count--);
+  }
 }
 
 
@@ -255,7 +324,7 @@ void R_DrawColumnLow (void)
 // Spectre/Invisibility.
 //
 #define FUZZTABLE		50 
-#define FUZZOFF	(SCREENWIDTH)
+#define FUZZOFF	(1)
 
 
 int	fuzzoffset[FUZZTABLE] =
@@ -271,6 +340,16 @@ int	fuzzoffset[FUZZTABLE] =
 
 int	fuzzpos = 0; 
 
+// [crispy] draw fuzz effect independent of rendering frame rate
+static int fuzzpos_tic;
+void R_SetFuzzPosTic (void)
+{
+	fuzzpos_tic = fuzzpos;
+}
+void R_SetFuzzPosDraw (void)
+{
+	fuzzpos = fuzzpos_tic;
+}
 
 //
 // Framebuffer postprocessing.
@@ -286,6 +365,7 @@ void R_DrawFuzzColumn (void)
     pixel_t*		dest;
     fixed_t		frac;
     fixed_t		fracstep;	 
+    boolean		cutoff = false;
 
     // Adjust borders. Low... 
     if (!dc_yl) 
@@ -293,7 +373,10 @@ void R_DrawFuzzColumn (void)
 
     // .. and high.
     if (dc_yh == viewheight-1) 
+    {
 	dc_yh = viewheight - 2; 
+	cutoff = true;
+    }
 		 
     count = dc_yh - dc_yl; 
 
@@ -325,7 +408,11 @@ void R_DrawFuzzColumn (void)
 	//  a pixel that is either one column
 	//  left or right of the current one.
 	// Add index from colormap to index.
-	*dest = colormaps[6*256+dest[fuzzoffset[fuzzpos]]]; 
+#ifndef CRISPY_TRUECOLOR
+	*dest = colormaps[6*256+dest[SCREENWIDTH*fuzzoffset[fuzzpos]]]; 
+#else
+	*dest = I_BlendDark(dest[fuzzoffset[fuzzpos]], 0xc0);
+#endif
 
 	// Clamp table lookup index.
 	if (++fuzzpos == FUZZTABLE) 
@@ -335,6 +422,17 @@ void R_DrawFuzzColumn (void)
 
 	frac += fracstep; 
     } while (count--); 
+
+    // [crispy] if the line at the bottom had to be cut off,
+    // draw one extra line using only pixels of that line and the one above
+    if (cutoff)
+    {
+#ifndef CRISPY_TRUECOLOR
+	*dest = colormaps[6*256+dest[SCREENWIDTH*(fuzzoffset[fuzzpos]-FUZZOFF)/2]];
+#else
+	*dest = I_BlendDark(dest[(fuzzoffset[fuzzpos]-FUZZOFF)/2], 0xc0);
+#endif
+    }
 } 
 
 // low detail mode version
@@ -342,11 +440,12 @@ void R_DrawFuzzColumn (void)
 void R_DrawFuzzColumnLow (void) 
 { 
     int			count; 
-    pixel_t*		dest;
-    pixel_t*		dest2;
+    pixel_t*		dest; 
+    pixel_t*		dest2; 
     fixed_t		frac;
     fixed_t		fracstep;	 
     int x;
+    boolean		cutoff = false;
 
     // Adjust borders. Low... 
     if (!dc_yl) 
@@ -354,7 +453,10 @@ void R_DrawFuzzColumnLow (void)
 
     // .. and high.
     if (dc_yh == viewheight-1) 
+    {
 	dc_yh = viewheight - 2; 
+	cutoff = true;
+    }
 		 
     count = dc_yh - dc_yl; 
 
@@ -391,8 +493,13 @@ void R_DrawFuzzColumnLow (void)
 	//  a pixel that is either one column
 	//  left or right of the current one.
 	// Add index from colormap to index.
-	*dest = colormaps[6*256+dest[fuzzoffset[fuzzpos]]]; 
-	*dest2 = colormaps[6*256+dest2[fuzzoffset[fuzzpos]]]; 
+#ifndef CRISPY_TRUECOLOR
+	*dest = colormaps[6*256+dest[SCREENWIDTH*fuzzoffset[fuzzpos]]];
+	*dest2 = colormaps[6*256+dest2[SCREENWIDTH*fuzzoffset[fuzzpos]]];
+#else
+	*dest = I_BlendDark(dest[fuzzoffset[fuzzpos]], 0xc0);
+	*dest2 = I_BlendDark(dest2[fuzzoffset[fuzzpos]], 0xc0);
+#endif
 
 	// Clamp table lookup index.
 	if (++fuzzpos == FUZZTABLE) 
@@ -403,6 +510,19 @@ void R_DrawFuzzColumnLow (void)
 
 	frac += fracstep; 
     } while (count--); 
+
+    // [crispy] if the line at the bottom had to be cut off,
+    // draw one extra line using only pixels of that line and the one above
+    if (cutoff)
+    {
+#ifndef CRISPY_TRUECOLOR
+	*dest = colormaps[6*256+dest[SCREENWIDTH*(fuzzoffset[fuzzpos]-FUZZOFF)/2]];
+	*dest2 = colormaps[6*256+dest2[SCREENWIDTH*(fuzzoffset[fuzzpos]-FUZZOFF)/2]];
+#else
+	*dest = I_BlendDark(dest[(fuzzoffset[fuzzpos]-FUZZOFF)/2], 0xc0);
+	*dest2 = I_BlendDark(dest2[(fuzzoffset[fuzzpos]-FUZZOFF)/2], 0xc0);
+#endif
+    }
 } 
  
   
@@ -458,7 +578,7 @@ void R_DrawTranslatedColumn (void)
 	//  used with PLAY sprites.
 	// Thus the "green" ramp of the player 0 sprite
 	//  is mapped to gray, red, black/indigo. 
-	*dest = dc_colormap[dc_translation[dc_source[frac>>FRACBITS]]];
+	*dest = dc_colormap[0][dc_translation[dc_source[frac>>FRACBITS]]];
 	dest += SCREENWIDTH;
 	
 	frac += fracstep; 
@@ -468,8 +588,8 @@ void R_DrawTranslatedColumn (void)
 void R_DrawTranslatedColumnLow (void) 
 { 
     int			count; 
-    pixel_t*		dest;
-    pixel_t*		dest2;
+    pixel_t*		dest; 
+    pixel_t*		dest2; 
     fixed_t		frac;
     fixed_t		fracstep;	 
     int                 x;
@@ -493,8 +613,8 @@ void R_DrawTranslatedColumnLow (void)
 #endif 
 
 
-    dest = ylookup[dc_yl] + columnofs[x]; 
-    dest2 = ylookup[dc_yl] + columnofs[x+1]; 
+    dest = ylookup[dc_yl] + columnofs[x];
+    dest2 = ylookup[dc_yl] + columnofs[x+1];
 
     // Looks familiar.
     fracstep = dc_iscale; 
@@ -508,8 +628,8 @@ void R_DrawTranslatedColumnLow (void)
 	//  used with PLAY sprites.
 	// Thus the "green" ramp of the player 0 sprite
 	//  is mapped to gray, red, black/indigo. 
-	*dest = dc_colormap[dc_translation[dc_source[frac>>FRACBITS]]];
-	*dest2 = dc_colormap[dc_translation[dc_source[frac>>FRACBITS]]];
+	*dest = dc_colormap[0][dc_translation[dc_source[frac>>FRACBITS]]];
+	*dest2 = dc_colormap[0][dc_translation[dc_source[frac>>FRACBITS]]];
 	dest += SCREENWIDTH;
 	dest2 += SCREENWIDTH;
 	
@@ -517,8 +637,98 @@ void R_DrawTranslatedColumnLow (void)
     } while (count--); 
 } 
 
+// [crispy] draw translucent column
+extern byte *tranmap;
 
+void R_DrawTLColumn (void)
+{
+    int			count;
+    pixel_t*		dest;
+    fixed_t		frac;
+    fixed_t		fracstep;
 
+    count = dc_yh - dc_yl;
+    if (count < 0)
+	return;
+
+#ifdef RANGECHECK
+    if ((unsigned)dc_x >= SCREENWIDTH
+	|| dc_yl < 0
+	|| dc_yh >= SCREENHEIGHT)
+    {
+	I_Error ( "R_DrawColumn: %i to %i at %i",
+		  dc_yl, dc_yh, dc_x);
+    }
+#endif
+
+    dest = ylookup[dc_yl] + columnofs[dc_x];
+
+    fracstep = dc_iscale;
+    frac = dc_texturemid + (dc_yl-centery)*fracstep;
+
+    do
+    {
+#ifndef CRISPY_TRUECOLOR
+        // actual translucency map lookup taken from boom202s/R_DRAW.C:255
+        *dest = tranmap[(*dest<<8)+dc_colormap[0][dc_source[frac>>FRACBITS]]];
+#else
+        const pixel_t destrgb = dc_colormap[0][dc_source[frac>>FRACBITS]];
+        *dest = blendfunc(*dest, destrgb);
+#endif
+	dest += SCREENWIDTH;
+
+	frac += fracstep;
+    } while (count--);
+}
+
+// [crispy] draw translucent column, low-resolution version
+void R_DrawTLColumnLow (void)
+{
+    int			count;
+    pixel_t*		dest;
+    pixel_t*		dest2;
+    fixed_t		frac;
+    fixed_t		fracstep;
+    int                 x;
+
+    count = dc_yh - dc_yl;
+    if (count < 0)
+	return;
+
+    x = dc_x << 1;
+
+#ifdef RANGECHECK
+    if ((unsigned)x >= SCREENWIDTH
+	|| dc_yl < 0
+	|| dc_yh >= SCREENHEIGHT)
+    {
+	I_Error ( "R_DrawColumn: %i to %i at %i",
+		  dc_yl, dc_yh, x);
+    }
+#endif
+
+    dest = ylookup[dc_yl] + columnofs[x];
+    dest2 = ylookup[dc_yl] + columnofs[x+1];
+
+    fracstep = dc_iscale;
+    frac = dc_texturemid + (dc_yl-centery)*fracstep;
+
+    do
+    {
+#ifndef CRISPY_TRUECOLOR
+	*dest = tranmap[(*dest<<8)+dc_colormap[0][dc_source[frac>>FRACBITS]]];
+	*dest2 = tranmap[(*dest2<<8)+dc_colormap[0][dc_source[frac>>FRACBITS]]];
+#else
+	const pixel_t destrgb = dc_colormap[0][dc_source[frac>>FRACBITS]];
+	*dest = blendfunc(*dest, destrgb);
+	*dest2 = blendfunc(*dest2, destrgb);
+#endif
+	dest += SCREENWIDTH;
+	dest2 += SCREENWIDTH;
+
+	frac += fracstep;
+    } while (count--);
+}
 
 //
 // R_InitTranslationTables
@@ -571,7 +781,8 @@ int			ds_y;
 int			ds_x1; 
 int			ds_x2;
 
-lighttable_t*		ds_colormap; 
+lighttable_t*		ds_colormap[2];
+byte*			ds_brightmap;
 
 fixed_t			ds_xfrac; 
 fixed_t			ds_yfrac; 
@@ -589,7 +800,7 @@ int			dscount;
 // Draws the actual span.
 void R_DrawSpan (void) 
 { 
-    unsigned int position, step;
+//  unsigned int position, step;
     pixel_t *dest;
     int count;
     int spot;
@@ -612,10 +823,12 @@ void R_DrawSpan (void)
     // each 16-bit part, the top 6 bits are the integer part and the
     // bottom 10 bits are the fractional part of the pixel position.
 
+/*
     position = ((ds_xfrac << 10) & 0xffff0000)
              | ((ds_yfrac >> 6)  & 0x0000ffff);
     step = ((ds_xstep << 10) & 0xffff0000)
          | ((ds_ystep >> 6)  & 0x0000ffff);
+*/
 
     dest = ylookup[ds_y] + columnofs[ds_x1];
 
@@ -624,16 +837,21 @@ void R_DrawSpan (void)
 
     do
     {
+	byte source;
 	// Calculate current texture index in u,v.
-        ytemp = (position >> 4) & 0x0fc0;
-        xtemp = (position >> 26);
+        // [crispy] fix flats getting more distorted the closer they are to the right
+        ytemp = (ds_yfrac >> 10) & 0x0fc0;
+        xtemp = (ds_xfrac >> 16) & 0x3f;
         spot = xtemp | ytemp;
 
 	// Lookup pixel from flat texture tile,
 	//  re-index using light/colormap.
-	*dest++ = ds_colormap[ds_source[spot]];
+	source = ds_source[spot];
+	*dest++ = ds_colormap[ds_brightmap[source]][source];
 
-        position += step;
+//      position += step;
+        ds_xfrac += ds_xstep;
+        ds_yfrac += ds_ystep;
 
     } while (count--);
 }
@@ -718,7 +936,7 @@ void R_DrawSpan (void)
 //
 void R_DrawSpanLow (void)
 {
-    unsigned int position, step;
+//  unsigned int position, step;
     unsigned int xtemp, ytemp;
     pixel_t *dest;
     int count;
@@ -736,10 +954,12 @@ void R_DrawSpanLow (void)
 //	dscount++; 
 #endif
 
+/*
     position = ((ds_xfrac << 10) & 0xffff0000)
              | ((ds_yfrac >> 6)  & 0x0000ffff);
     step = ((ds_xstep << 10) & 0xffff0000)
          | ((ds_ystep >> 6)  & 0x0000ffff);
+*/
 
     count = (ds_x2 - ds_x1);
 
@@ -751,17 +971,23 @@ void R_DrawSpanLow (void)
 
     do
     {
+	byte source;
 	// Calculate current texture index in u,v.
-        ytemp = (position >> 4) & 0x0fc0;
-        xtemp = (position >> 26);
+        // [crispy] fix flats getting more distorted the closer they are to the right
+        ytemp = (ds_yfrac >> 10) & 0x0fc0;
+        xtemp = (ds_xfrac >> 16) & 0x3f;
         spot = xtemp | ytemp;
 
 	// Lowres/blocky mode does it twice,
 	//  while scale is adjusted appropriately.
-	*dest++ = ds_colormap[ds_source[spot]];
-	*dest++ = ds_colormap[ds_source[spot]];
+	source = ds_source[spot];
+	*dest++ = ds_colormap[ds_brightmap[source]][source];
+	*dest++ = ds_colormap[ds_brightmap[source]][source];
 
-	position += step;
+//	position += step;
+	ds_xfrac += ds_xstep;
+	ds_yfrac += ds_ystep;
+
 
     } while (count--);
 }
@@ -857,6 +1083,7 @@ void R_FillBackScreen (void)
 	 
     for (y=0 ; y<SCREENHEIGHT-SBARHEIGHT ; y++) 
     { 
+#ifndef CRISPY_TRUECOLOR
 	for (x=0 ; x<SCREENWIDTH/64 ; x++) 
 	{ 
 	    memcpy (dest, src+((y&63)<<6), 64); 
@@ -868,6 +1095,12 @@ void R_FillBackScreen (void)
 	    memcpy (dest, src+((y&63)<<6), SCREENWIDTH&63); 
 	    dest += (SCREENWIDTH&63); 
 	} 
+#else
+	for (x=0 ; x<SCREENWIDTH ; x++)
+	{
+		*dest++ = colormaps[src[((y&63)<<6) + (x&63)]];
+	}
+#endif
     } 
      
     // Draw screen and bezel; this is done to a separate screen buffer.
@@ -876,36 +1109,36 @@ void R_FillBackScreen (void)
 
     patch = W_CacheLumpName(DEH_String("brdr_t"),PU_CACHE);
 
-    for (x=0 ; x<scaledviewwidth ; x+=8)
-	V_DrawPatch(viewwindowx+x, viewwindowy-8, patch);
+    for (x=0 ; x<(scaledviewwidth >> crispy->hires) ; x+=8)
+	V_DrawPatch((viewwindowx >> crispy->hires)+x, (viewwindowy >> crispy->hires)-8, patch);
     patch = W_CacheLumpName(DEH_String("brdr_b"),PU_CACHE);
 
-    for (x=0 ; x<scaledviewwidth ; x+=8)
-	V_DrawPatch(viewwindowx+x, viewwindowy+viewheight, patch);
+    for (x=0 ; x<(scaledviewwidth >> crispy->hires) ; x+=8)
+	V_DrawPatch((viewwindowx >> crispy->hires)+x, (viewwindowy >> crispy->hires)+(viewheight >> crispy->hires), patch);
     patch = W_CacheLumpName(DEH_String("brdr_l"),PU_CACHE);
 
-    for (y=0 ; y<viewheight ; y+=8)
-	V_DrawPatch(viewwindowx-8, viewwindowy+y, patch);
+    for (y=0 ; y<(viewheight >> crispy->hires) ; y+=8)
+	V_DrawPatch((viewwindowx >> crispy->hires)-8, (viewwindowy >> crispy->hires)+y, patch);
     patch = W_CacheLumpName(DEH_String("brdr_r"),PU_CACHE);
 
-    for (y=0 ; y<viewheight ; y+=8)
-	V_DrawPatch(viewwindowx+scaledviewwidth, viewwindowy+y, patch);
+    for (y=0 ; y<(viewheight >> crispy->hires) ; y+=8)
+	V_DrawPatch((viewwindowx >> crispy->hires)+(scaledviewwidth >> crispy->hires), (viewwindowy >> crispy->hires)+y, patch);
 
     // Draw beveled edge. 
-    V_DrawPatch(viewwindowx-8,
-                viewwindowy-8,
+    V_DrawPatch((viewwindowx >> crispy->hires)-8,
+                (viewwindowy >> crispy->hires)-8,
                 W_CacheLumpName(DEH_String("brdr_tl"),PU_CACHE));
     
-    V_DrawPatch(viewwindowx+scaledviewwidth,
-                viewwindowy-8,
+    V_DrawPatch((viewwindowx >> crispy->hires)+(scaledviewwidth >> crispy->hires),
+                (viewwindowy >> crispy->hires)-8,
                 W_CacheLumpName(DEH_String("brdr_tr"),PU_CACHE));
     
-    V_DrawPatch(viewwindowx-8,
-                viewwindowy+viewheight,
+    V_DrawPatch((viewwindowx >> crispy->hires)-8,
+                (viewwindowy >> crispy->hires)+(viewheight >> crispy->hires),
                 W_CacheLumpName(DEH_String("brdr_bl"),PU_CACHE));
     
-    V_DrawPatch(viewwindowx+scaledviewwidth,
-                viewwindowy+viewheight,
+    V_DrawPatch((viewwindowx >> crispy->hires)+(scaledviewwidth >> crispy->hires),
+                (viewwindowy >> crispy->hires)+(viewheight >> crispy->hires),
                 W_CacheLumpName(DEH_String("brdr_br"),PU_CACHE));
 
     V_RestoreBuffer();
@@ -948,21 +1181,21 @@ void R_DrawViewBorder (void)
     if (scaledviewwidth == SCREENWIDTH) 
 	return; 
   
-    top = ((SCREENHEIGHT-SBARHEIGHT)-viewheight)/2; 
+    top = ((SCREENHEIGHT-SBARHEIGHT)-viewheight)/2;
     side = (SCREENWIDTH-scaledviewwidth)/2; 
  
     // copy top and one line of left side 
     R_VideoErase (0, top*SCREENWIDTH+side); 
  
     // copy one line of right side and bottom 
-    ofs = (viewheight+top)*SCREENWIDTH-side; 
+    ofs = (viewheight+top)*SCREENWIDTH-side;
     R_VideoErase (ofs, top*SCREENWIDTH+side); 
  
     // copy sides using wraparound 
     ofs = top*SCREENWIDTH + SCREENWIDTH-side; 
     side <<= 1;
     
-    for (i=1 ; i<viewheight ; i++) 
+    for (i=1 ; i<viewheight ; i++)
     { 
 	R_VideoErase (ofs, side); 
 	ofs += SCREENWIDTH; 

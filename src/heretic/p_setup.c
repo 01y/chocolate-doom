@@ -50,8 +50,8 @@ line_t *lines;
 int numsides;
 side_t *sides;
 
-short *blockmaplump;            // offsets in blockmap are from here
-short *blockmap;
+int32_t *blockmap;	            // offsets in blockmap are from here // [crispy] BLOCKMAP limit
+int32_t *blockmaplump;          // [crispy] BLOCKMAP limit
 int bmapwidth, bmapheight;      // in mapblocks
 fixed_t bmaporgx, bmaporgy;     // origin of block map
 mobj_t **blocklinks;            // for thing chains
@@ -60,6 +60,7 @@ byte *rejectmatrix;             // for fast sight rejection
 
 mapthing_t deathmatchstarts[10], *deathmatch_p;
 mapthing_t playerstarts[MAXPLAYERS];
+boolean playerstartsingame[MAXPLAYERS];
 
 /*
 =================
@@ -86,6 +87,11 @@ void P_LoadVertexes(int lump)
     {
         li->x = SHORT(ml->x) << FRACBITS;
         li->y = SHORT(ml->y) << FRACBITS;
+
+        // [crispy] initialize pseudovertexes with actual vertex coordinates
+        li->r_x = li->x;
+        li->r_y = li->y;
+        li->moved = false;
     }
 
     W_ReleaseLumpNum(lump);
@@ -279,6 +285,18 @@ void P_LoadThings(int lump)
         P_SpawnMapThing(&spawnthing);
     }
 
+    if (!deathmatch)
+    {
+        for (i = 0; i < MAXPLAYERS; i++)
+        {
+            if (playeringame[i] && !playerstartsingame[i])
+            {
+                I_Error("P_LoadThings: Player %d start missing (vanilla crashes here)", i + 1);
+            }
+            playerstartsingame[i] = false;
+        }
+    }
+
     W_ReleaseLumpNum(lump);
 }
 
@@ -414,18 +432,33 @@ void P_LoadBlockMap(int lump)
 {
     int i, count;
     int lumplen;
+    short *wadblockmaplump;
 
     lumplen = W_LumpLength(lump);
 
-    blockmaplump = Z_Malloc(lumplen, PU_LEVEL, NULL);
-    W_ReadLump(lump, blockmaplump);
+    count = lumplen / 2; // [crispy] remove BLOCKMAP limit
+
+    // [crispy] remove BLOCKMAP limit
+    wadblockmaplump = Z_Malloc(lumplen, PU_LEVEL, NULL);
+    W_ReadLump(lump, wadblockmaplump);
+    blockmaplump = Z_Malloc(sizeof(*blockmaplump) * count, PU_LEVEL, NULL);
     blockmap = blockmaplump + 4;
 
-    // Swap all short integers to native byte ordering:
+    blockmaplump[0] = SHORT(wadblockmaplump[0]);
+    blockmaplump[1] = SHORT(wadblockmaplump[1]);
+    blockmaplump[2] = (int32_t)(SHORT(wadblockmaplump[2])) & 0xffff;
+    blockmaplump[3] = (int32_t)(SHORT(wadblockmaplump[3])) & 0xffff;
 
-    count = lumplen / 2;
-    for (i = 0; i < count; i++)
-        blockmaplump[i] = SHORT(blockmaplump[i]);
+    // Swap all short integers to native byte ordering:
+	
+    // count = lumplen / 2; // [crispy] moved up
+    for (i=4; i<count; i++)
+    {
+        short t = SHORT(wadblockmaplump[i]);
+        blockmaplump[i] = (t == -1) ? -1l : (int32_t) t & 0xffff;
+    }
+
+    Z_Free(wadblockmaplump);
 
     bmaporgx = blockmaplump[0] << FRACBITS;
     bmaporgy = blockmaplump[1] << FRACBITS;
@@ -530,6 +563,58 @@ void P_GroupLines(void)
 
 //=============================================================================
 
+// [crispy] remove slime trails
+// mostly taken from Lee Killough's implementation in mbfsrc/P_SETUP.C:849-924,
+// with the exception that not the actual vertex coordinates are modified,
+// but separate coordinates that are *only* used in rendering,
+// i.e. r_bsp.c:R_AddLine()
+
+static void P_RemoveSlimeTrails(void)
+{
+    int i;
+
+    for (i = 0; i < numsegs; i++)
+    {
+	const line_t *l = segs[i].linedef;
+	vertex_t *v = segs[i].v1;
+
+	// [crispy] ignore exactly vertical or horizontal linedefs
+	if (l->dx && l->dy)
+	{
+	    do
+	    {
+		// [crispy] vertex wasn't already moved
+		if (!v->moved)
+		{
+		    v->moved = true;
+		    // [crispy] ignore endpoints of linedefs
+		    if (v != l->v1 && v != l->v2)
+		    {
+			// [crispy] move the vertex towards the linedef
+			// by projecting it using the law of cosines
+			int64_t dx2 = (l->dx >> FRACBITS) * (l->dx >> FRACBITS);
+			int64_t dy2 = (l->dy >> FRACBITS) * (l->dy >> FRACBITS);
+			int64_t dxy = (l->dx >> FRACBITS) * (l->dy >> FRACBITS);
+			int64_t s = dx2 + dy2;
+
+			// [crispy] MBF actually overrides v->x and v->y here
+			v->r_x = (fixed_t)((dx2 * v->x + dy2 * l->v1->x + dxy * (v->y - l->v1->y)) / s);
+			v->r_y = (fixed_t)((dy2 * v->y + dx2 * l->v1->y + dxy * (v->x - l->v1->x)) / s);
+
+			// [crispy] wait a minute... moved more than 8 map units?
+			// maybe that's a linguortal then, back to the original coordinates
+			if (abs(v->r_x - v->x) > 8*FRACUNIT || abs(v->r_y - v->y) > 8*FRACUNIT)
+			{
+			    v->r_x = v->x;
+			    v->r_y = v->y;
+			}
+		    }
+		}
+	    // [crispy] if v doesn't point to the second vertex of the seg already, point it there
+	    } while ((v != segs[i].v2) && (v = segs[i].v2));
+	}
+    }
+}
 
 /*
 =================
@@ -586,6 +671,9 @@ void P_SetupLevel(int episode, int map, int playermask, skill_t skill)
 
     rejectmatrix = W_CacheLumpNum(lumpnum + ML_REJECT, PU_LEVEL);
     P_GroupLines();
+
+    // [crispy] remove slime trails
+    P_RemoveSlimeTrails();
 
     bodyqueslot = 0;
     deathmatch_p = deathmatchstarts;

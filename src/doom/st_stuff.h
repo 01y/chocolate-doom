@@ -28,9 +28,14 @@
 // Size of statusbar.
 // Now sensitive for scaling.
 #define ST_HEIGHT	32
-#define ST_WIDTH	SCREENWIDTH
-#define ST_Y		(SCREENHEIGHT - ST_HEIGHT)
+#define ST_WIDTH	ORIGWIDTH
+#define ST_Y		(ORIGHEIGHT - ST_HEIGHT)
 
+#define CRISPY_HUD 12
+
+// [crispy] Demo Timer widget
+extern void ST_DrawDemoTimer (const int time);
+extern int defdemotics, deftotaldemotics;
 
 //
 // STATUS BAR
@@ -80,7 +85,7 @@ extern cheatseq_t cheat_ammo;
 extern cheatseq_t cheat_ammonokey;
 extern cheatseq_t cheat_noclip;
 extern cheatseq_t cheat_commercial_noclip;
-extern cheatseq_t cheat_powerup[7];
+extern cheatseq_t cheat_powerup[8]; // [crispy] idbehold0
 extern cheatseq_t cheat_choppers;
 extern cheatseq_t cheat_clev;
 extern cheatseq_t cheat_mypos;

@@ -33,6 +33,8 @@
 #include "net_io.h"
 #include "net_query.h"
 
+#include "net_petname.h"
+
 #define MULTI_START_HELP_URL "https://www.chocolate-doom.org/setup-multi-start"
 #define MULTI_JOIN_HELP_URL "https://www.chocolate-doom.org/setup-multi-join"
 #define MULTI_CONFIG_HELP_URL "https://www.chocolate-doom.org/setup-multi-config"
@@ -111,7 +113,7 @@ static const char *strife_skills[] =
 
 static const char *character_classes[] = { "Fighter", "Cleric", "Mage" };
 
-static const char *gamemodes[] = { "Co-operative", "Deathmatch", "Deathmatch 2.0" };
+static const char *gamemodes[] = { "Co-operative", "Deathmatch", "Deathmatch 2.0", "Deathmatch 3.0" };
 
 static const char *strife_gamemodes[] =
 {
@@ -264,6 +266,10 @@ static void StartGame(int multiplayer)
         else if (deathmatch == 2 || strife_altdeath != 0)
         {
             AddCmdLineParameter(exec, "-altdeath");
+        }
+        else if (deathmatch == 3) // AX: this is a Crispy-specific change
+        {
+            AddCmdLineParameter(exec, "-dm3");
         }
 
         if (timer > 0)
@@ -684,7 +690,7 @@ static txt_dropdown_list_t *GameTypeDropdown(void)
     {
         case doom:
         default:
-            return TXT_NewDropdownList(&deathmatch, gamemodes, 3);
+            return TXT_NewDropdownList(&deathmatch, gamemodes, 4);
 
         // Heretic and Hexen don't support Deathmatch II:
 
@@ -705,7 +711,7 @@ static txt_dropdown_list_t *GameTypeDropdown(void)
 // and the single player warp menu.  The parameters specify
 // the window title and whether to display multiplayer options.
 
-static void StartGameMenu(char *window_title, int multiplayer)
+static void StartGameMenu(const char *window_title, int multiplayer)
 {
     txt_window_t *window;
     txt_widget_t *iwad_selector;
@@ -798,12 +804,12 @@ static void StartGameMenu(char *window_title, int multiplayer)
     UpdateWarpButton();
 }
 
-void StartMultiGame(void)
+void StartMultiGame(TXT_UNCAST_ARG(widget), void *user_data)
 {
     StartGameMenu("Start multiplayer game", 1);
 }
 
-void WarpMenu(void)
+void WarpMenu(TXT_UNCAST_ARG(widget), void *user_data)
 {
     StartGameMenu("Level Warp", 0);
 }
@@ -984,7 +990,7 @@ static void QueryWindowClosed(TXT_UNCAST_ARG(window), void *unused)
     TXT_SetPeriodicCallback(NULL, NULL, 0);
 }
 
-static void ServerQueryWindow(char *title)
+static void ServerQueryWindow(const char *title)
 {
     txt_table_t *results_table;
 
@@ -1016,7 +1022,7 @@ static void FindLANServer(TXT_UNCAST_ARG(widget),
     ServerQueryWindow("Find LAN server");
 }
 
-void JoinMultiGame(void)
+void JoinMultiGame(TXT_UNCAST_ARG(widget), void *user_data)
 {
     txt_window_t *window;
     txt_inputbox_t *address_box;
@@ -1067,7 +1073,7 @@ void JoinMultiGame(void)
 void SetChatMacroDefaults(void)
 {
     int i;
-    char *defaults[] = 
+    const char *const defaults[] =
     {
         HUSTR_CHATMACRO0,
         HUSTR_CHATMACRO1,
@@ -1096,32 +1102,11 @@ void SetPlayerNameDefault(void)
 {
     if (net_player_name == NULL)
     {
-        net_player_name = getenv("USER");
+        net_player_name = NET_GetRandomPetName();
     }
-
-    if (net_player_name == NULL)
-    {
-        net_player_name = getenv("USERNAME");
-    }
-
-    if (net_player_name == NULL)
-    {
-        net_player_name = "player";
-    }
-
-    // Now strdup() the string so that it's in a mutable form
-    // that can be freed when the value changes.
-
-#ifdef _WIN32
-    // On Windows, environment variables are in OEM codepage
-    // encoding, so convert to UTF8:
-    net_player_name = M_OEMToUTF8(net_player_name);
-#else
-    net_player_name = M_StringDuplicate(net_player_name);
-#endif
 }
 
-void MultiplayerConfig(void)
+void MultiplayerConfig(TXT_UNCAST_ARG(widget), void *user_data)
 {
     txt_window_t *window;
     txt_label_t *label;

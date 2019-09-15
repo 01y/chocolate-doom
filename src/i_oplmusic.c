@@ -349,7 +349,7 @@ static unsigned int last_perc_count;
 // Configuration file variable, containing the port number for the
 // adlib chip.
 
-char *snd_dmxoption = "";
+char *snd_dmxoption = "-opl3"; // [crispy] default to OPL3 emulation
 int opl_io_port = 0x388;
 
 // If true, OPL sound channels are reversed to their correct arrangement
@@ -1127,7 +1127,7 @@ static void SetChannelPan(opl_channel_data_t *channel, unsigned int pan)
     // perhaps it was just a bug in the OPL3 support that was never
     // finished. By default we preserve this bug, but we also provide a
     // secret DMXOPTION to fix it.
-    if (opl_stereo_correct)
+//    if (opl_stereo_correct) // [crispy] unconditionally enable correctly reversed stereo
     {
         pan = 144 - pan;
     }
@@ -1653,7 +1653,8 @@ static void *I_OPL_RegisterSong(void *data, int len)
 
     filename = M_TempFile("doom.mid");
 
-    if (IsMid(data, len) && len < MAXMIDLENGTH)
+    // [crispy] remove MID file size limit
+    if (IsMid(data, len) /* && len < MAXMIDLENGTH */)
     {
         M_WriteFile(filename, data, len);
     }

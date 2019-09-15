@@ -36,6 +36,7 @@
 FILE *save_stream;
 int savegamelength;
 boolean savegame_error;
+static int restoretargets_fail;
 
 // Get the filename of a temporary file to write the savegame to.  After
 // the file has been successfully saved, it will be renamed to the 
@@ -205,13 +206,13 @@ static void saveg_writep(const void *p)
 static void saveg_read_mapthing_t(mapthing_t *str)
 {
     // short x;
-    str->x = saveg_read16();
+    str->x = crispy->fliplevels ? -saveg_read16() : saveg_read16();
 
     // short y;
     str->y = saveg_read16();
 
     // short angle;
-    str->angle = saveg_read16();
+    str->angle = crispy->fliplevels ? (180 - saveg_read16()) : saveg_read16();
 
     // short type;
     str->type = saveg_read16();
@@ -223,13 +224,13 @@ static void saveg_read_mapthing_t(mapthing_t *str)
 static void saveg_write_mapthing_t(mapthing_t *str)
 {
     // short x;
-    saveg_write16(str->x);
+    saveg_write16(crispy->fliplevels ? -str->x : str->x);
 
     // short y;
     saveg_write16(str->y);
 
     // short angle;
-    saveg_write16(str->angle);
+    saveg_write16(crispy->fliplevels ? (180 - str->angle) : str->angle);
 
     // short type;
     saveg_write16(str->type);
@@ -303,7 +304,7 @@ static void saveg_read_mobj_t(mobj_t *str)
     saveg_read_thinker_t(&str->thinker);
 
     // fixed_t x;
-    str->x = saveg_read32();
+    str->x = crispy->fliplevels ? -saveg_read32() : saveg_read32();
 
     // fixed_t y;
     str->y = saveg_read32();
@@ -318,7 +319,7 @@ static void saveg_read_mobj_t(mobj_t *str)
     str->sprev = saveg_readp();
 
     // angle_t angle;
-    str->angle = saveg_read32();
+    str->angle = crispy->fliplevels ? (ANG180 - saveg_read32()) : saveg_read32();
 
     // spritenum_t sprite;
     str->sprite = saveg_read_enum();
@@ -348,7 +349,7 @@ static void saveg_read_mobj_t(mobj_t *str)
     str->height = saveg_read32();
 
     // fixed_t momx;
-    str->momx = saveg_read32();
+    str->momx = crispy->fliplevels ? -saveg_read32() : saveg_read32();
 
     // fixed_t momy;
     str->momy = saveg_read32();
@@ -399,6 +400,7 @@ static void saveg_read_mobj_t(mobj_t *str)
     {
         str->player = &players[pl - 1];
         str->player->mo = str;
+        str->player->so = Crispy_PlayerSO(pl - 1); // [crispy] weapon sound sources
     }
     else
     {
@@ -415,13 +417,59 @@ static void saveg_read_mobj_t(mobj_t *str)
     str->tracer = saveg_readp();
 }
 
+// [crispy] enumerate all thinker pointers
+uint32_t P_ThinkerToIndex (thinker_t* thinker)
+{
+    thinker_t*	th;
+    uint32_t	i;
+
+    if (!thinker)
+	return 0;
+
+    for (th = thinkercap.next, i = 0; th != &thinkercap; th = th->next)
+    {
+	if (th->function.acp1 == (actionf_p1) P_MobjThinker)
+	{
+	    i++;
+	    if (th == thinker)
+		return i;
+	}
+    }
+
+    return 0;
+}
+
+// [crispy] replace indizes with corresponding pointers
+thinker_t* P_IndexToThinker (uint32_t index)
+{
+    thinker_t*	th;
+    uint32_t	i;
+
+    if (!index)
+	return NULL;
+
+    for (th = thinkercap.next, i = 0; th != &thinkercap; th = th->next)
+    {
+	if (th->function.acp1 == (actionf_p1) P_MobjThinker)
+	{
+	    i++;
+	    if (i == index)
+		return th;
+	}
+    }
+
+    restoretargets_fail++;
+
+    return NULL;
+}
+
 static void saveg_write_mobj_t(mobj_t *str)
 {
     // thinker_t thinker;
     saveg_write_thinker_t(&str->thinker);
 
     // fixed_t x;
-    saveg_write32(str->x);
+    saveg_write32(crispy->fliplevels ? -str->x : str->x);
 
     // fixed_t y;
     saveg_write32(str->y);
@@ -436,7 +484,7 @@ static void saveg_write_mobj_t(mobj_t *str)
     saveg_writep(str->sprev);
 
     // angle_t angle;
-    saveg_write32(str->angle);
+    saveg_write32(crispy->fliplevels ? (ANG180 - str->angle) : str->angle);
 
     // spritenum_t sprite;
     saveg_write_enum(str->sprite);
@@ -466,7 +514,7 @@ static void saveg_write_mobj_t(mobj_t *str)
     saveg_write32(str->height);
 
     // fixed_t momx;
-    saveg_write32(str->momx);
+    saveg_write32(crispy->fliplevels ? -str->momx : str->momx);
 
     // fixed_t momy;
     saveg_write32(str->momy);
@@ -502,7 +550,9 @@ static void saveg_write_mobj_t(mobj_t *str)
     saveg_write32(str->movecount);
 
     // struct mobj_s* target;
-    saveg_writep(str->target);
+    // [crispy] instead of the actual pointer, store the
+    // corresponding index in the mobj->target field
+    saveg_writep((void *)(uintptr_t) P_ThinkerToIndex((thinker_t *) str->target));
 
     // int reactiontime;
     saveg_write32(str->reactiontime);
@@ -527,7 +577,9 @@ static void saveg_write_mobj_t(mobj_t *str)
     saveg_write_mapthing_t(&str->spawnpoint);
 
     // struct mobj_s* tracer;
-    saveg_writep(str->tracer);
+    // [crispy] instead of the actual pointer, store the
+    // corresponding index in the mobj->tracers field
+    saveg_writep((void *)(uintptr_t) P_ThinkerToIndex((thinker_t *) str->tracer));
 }
 
 
@@ -1507,7 +1559,7 @@ void P_ArchiveWorld (void)
 	saveg_write16(li->tag);
 	for (j=0 ; j<2 ; j++)
 	{
-	    if (li->sidenum[j] == -1)
+	    if (li->sidenum[j] == NO_INDEX) // [crispy] extended nodes
 		continue;
 	    
 	    si = &sides[li->sidenum[j]];
@@ -1537,15 +1589,27 @@ void P_UnArchiveWorld (void)
     // do sectors
     for (i=0, sec = sectors ; i<numsectors ; i++,sec++)
     {
+	// [crispy] add overflow guard for the flattranslation[] array
+	short floorpic, ceilingpic;
+	extern int numflats;
 	sec->floorheight = saveg_read16() << FRACBITS;
 	sec->ceilingheight = saveg_read16() << FRACBITS;
-	sec->floorpic = saveg_read16();
-	sec->ceilingpic = saveg_read16();
+	floorpic = saveg_read16();
+	ceilingpic = saveg_read16();
 	sec->lightlevel = saveg_read16();
 	sec->special = saveg_read16();		// needed?
 	sec->tag = saveg_read16();		// needed?
 	sec->specialdata = 0;
 	sec->soundtarget = 0;
+	// [crispy] add overflow guard for the flattranslation[] array
+	if (floorpic >= 0 && floorpic < numflats)
+	{
+	    sec->floorpic = floorpic;
+	}
+	if (ceilingpic >= 0 && ceilingpic < numflats)
+	{
+	    sec->ceilingpic = ceilingpic;
+	}
     }
     
     // do lines
@@ -1556,7 +1620,7 @@ void P_UnArchiveWorld (void)
 	li->tag = saveg_read16();
 	for (j=0 ; j<2 ; j++)
 	{
-	    if (li->sidenum[j] == -1)
+	    if (li->sidenum[j] == NO_INDEX) // [crispy] extended nodes
 		continue;
 	    si = &sides[li->sidenum[j]];
 	    si->textureoffset = saveg_read16() << FRACBITS;
@@ -1650,12 +1714,14 @@ void P_UnArchiveThinkers (void)
 	    mobj = Z_Malloc (sizeof(*mobj), PU_LEVEL, NULL);
             saveg_read_mobj_t(mobj);
 
-	    mobj->target = NULL;
-            mobj->tracer = NULL;
+	    // [crispy] restore mobj->target and mobj->tracer fields
+	    //mobj->target = NULL;
+            //mobj->tracer = NULL;
 	    P_SetThingPosition (mobj);
 	    mobj->info = &mobjinfo[mobj->type];
-	    mobj->floorz = mobj->subsector->sector->floorheight;
-	    mobj->ceilingz = mobj->subsector->sector->ceilingheight;
+	    // [crispy] killough 2/28/98: Fix for falling down into a wall after savegame loaded
+//	    mobj->floorz = mobj->subsector->sector->floorheight;
+//	    mobj->ceilingz = mobj->subsector->sector->ceilingheight;
 	    mobj->thinker.function.acp1 = (actionf_p1)P_MobjThinker;
 	    P_AddThinker (&mobj->thinker);
 	    break;
@@ -1668,6 +1734,29 @@ void P_UnArchiveThinkers (void)
 
 }
 
+// [crispy] after all the thinkers have been restored, replace all indices in
+// the mobj->target and mobj->tracers fields by the corresponding current pointers again
+void P_RestoreTargets (void)
+{
+    mobj_t*	mo;
+    thinker_t*	th;
+
+    for (th = thinkercap.next; th != &thinkercap; th = th->next)
+    {
+	if (th->function.acp1 == (actionf_p1) P_MobjThinker)
+	{
+	    mo = (mobj_t*) th;
+	    mo->target = (mobj_t*) P_IndexToThinker((uintptr_t) mo->target);
+	    mo->tracer = (mobj_t*) P_IndexToThinker((uintptr_t) mo->tracer);
+	}
+    }
+
+    if (restoretargets_fail)
+    {
+	fprintf (stderr, "P_RestoreTargets: Failed to restore %d target pointers.\n", restoretargets_fail);
+	restoretargets_fail = 0;
+    }
+}
 
 //
 // P_ArchiveSpecials
@@ -1717,6 +1806,17 @@ void P_ArchiveSpecials (void)
                 saveg_write8(tc_ceiling);
 		saveg_write_pad();
                 saveg_write_ceiling_t((ceiling_t *) th);
+	    }
+	    // [crispy] save plats in statis
+	    for (i = 0; i < MAXPLATS; i++)
+		if (activeplats[i] == (plat_t *)th)
+		    break;
+
+	    if (i < MAXPLATS)
+	    {
+		saveg_write8(tc_plat);
+		saveg_write_pad();
+		saveg_write_plat_t((plat_t *)th);
 	    }
 	    continue;
 	}

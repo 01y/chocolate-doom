@@ -43,6 +43,7 @@
 // Needs access to LFB.
 #include "v_video.h"
 
+#include "st_stuff.h" // [crispy] ST_DrawDemoTimer()
 #include "wi_stuff.h"
 
 //
@@ -80,7 +81,7 @@
 #define SP_STATSY		50
 
 #define SP_TIMEX		16
-#define SP_TIMEY		(SCREENHEIGHT-32)
+#define SP_TIMEY		(ORIGHEIGHT-32)
 
 
 // NET GAME STUFF
@@ -330,7 +331,7 @@ static int		cnt_par;
 static int		cnt_pause;
 
 // # of commercial levels
-static int		NUMCMAPS; 
+static int		NUMCMAPS = 32;
 
 
 //
@@ -390,6 +391,8 @@ static patch_t*		bp[MAXPLAYERS];
 
  // Name graphics of each level (centered)
 static patch_t**	lnames;
+// [crispy] prevent crashes with maps without map title graphics lump
+static unsigned int	num_lnames;
 
 // Buffer storing the backdrop
 static patch_t *background;
@@ -401,7 +404,7 @@ static patch_t *background;
 // slam background
 void WI_slamBackground(void)
 {
-    V_DrawPatch(0, 0, background);
+    V_DrawPatchFullScreen(background, false);
 }
 
 // The ticker is used to detect keys
@@ -417,21 +420,28 @@ void WI_drawLF(void)
 {
     int y = WI_TITLEY;
 
+    // [crispy] prevent crashes with maps without map title graphics lump
+    if (wbs->last >= num_lnames || lnames[wbs->last] == NULL)
+    {
+        V_DrawPatch((ORIGWIDTH - SHORT(finished->width)) / 2, y, finished);
+        return;
+    }
+
     if (gamemode != commercial || wbs->last < NUMCMAPS)
     {
         // draw <LevelName> 
-        V_DrawPatch((SCREENWIDTH - SHORT(lnames[wbs->last]->width))/2,
+        V_DrawPatch((ORIGWIDTH - SHORT(lnames[wbs->last]->width))/2,
                     y, lnames[wbs->last]);
 
         // draw "Finished!"
         y += (5*SHORT(lnames[wbs->last]->height))/4;
 
-        V_DrawPatch((SCREENWIDTH - SHORT(finished->width)) / 2, y, finished);
+        V_DrawPatch((ORIGWIDTH - SHORT(finished->width)) / 2, y, finished);
     }
     else if (wbs->last == NUMCMAPS)
     {
         // MAP33 - draw "Finished!" only
-        V_DrawPatch((SCREENWIDTH - SHORT(finished->width)) / 2, y, finished);
+        V_DrawPatch((ORIGWIDTH - SHORT(finished->width)) / 2, y, finished);
     }
     else if (wbs->last > NUMCMAPS)
     {
@@ -440,7 +450,7 @@ void WI_drawLF(void)
         // bits of memory at this point, but let's try to be accurate
         // anyway.  This deliberately triggers a V_DrawPatch error.
 
-        patch_t tmp = { SCREENWIDTH, SCREENHEIGHT, 1, 1, 
+        patch_t tmp = { ORIGWIDTH, ORIGHEIGHT, 1, 1,
                         { 0, 0, 0, 0, 0, 0, 0, 0 } };
 
         V_DrawPatch(0, y, &tmp);
@@ -454,15 +464,21 @@ void WI_drawEL(void)
 {
     int y = WI_TITLEY;
 
+    // [crispy] prevent crashes with maps without map title graphics lump
+    if (wbs->next >= num_lnames || lnames[wbs->next] == NULL)
+    {
+        return;
+    }
+
     // draw "Entering"
-    V_DrawPatch((SCREENWIDTH - SHORT(entering->width))/2,
+    V_DrawPatch((ORIGWIDTH - SHORT(entering->width))/2,
 		y,
                 entering);
 
     // draw level
     y += (5*SHORT(lnames[wbs->next]->height))/4;
 
-    V_DrawPatch((SCREENWIDTH - SHORT(lnames[wbs->next]->width))/2,
+    V_DrawPatch((ORIGWIDTH - SHORT(lnames[wbs->next]->width))/2,
 		y, 
                 lnames[wbs->next]);
 
@@ -490,9 +506,9 @@ WI_drawOnLnode
 	bottom = top + SHORT(c[i]->height);
 
 	if (left >= 0
-	    && right < SCREENWIDTH
+	    && right < ORIGWIDTH
 	    && top >= 0
-	    && bottom < SCREENHEIGHT)
+	    && bottom < ORIGHEIGHT)
 	{
 	    fits = true;
 	}
@@ -616,6 +632,13 @@ void WI_drawAnimatedBack(void)
 	    V_DrawPatch(a->loc.x, a->loc.y, a->p[a->ctr]);
     }
 
+    // [crispy] show Fortress of Mystery if it has been completed
+    if (wbs->epsd == 1 && wbs->didsecret)
+    {
+	a = &anims[wbs->epsd][7];
+
+	V_DrawPatch(a->loc.x, a->loc.y, a->p[a->nanims - 1]);
+    }
 }
 
 //
@@ -705,7 +728,8 @@ void
 WI_drawTime
 ( int		x,
   int		y,
-  int		t )
+  int		t,
+  boolean	suck )
 {
 
     int		div;
@@ -714,7 +738,7 @@ WI_drawTime
     if (t<0)
 	return;
 
-    if (t <= 61*59)
+    if (t <= 61*59 || !suck)
     {
 	div = 1;
 
@@ -728,7 +752,13 @@ WI_drawTime
 	    if (div==60 || t / div)
 		V_DrawPatch(x, y, colon);
 	    
-	} while (t / div);
+	} while (t / div && div < 3600);
+
+	// [crispy] print at most in hhhh:mm:ss format
+	if ((n = (t / div)))
+	{
+	    x = WI_drawNum(x, y, n, -1);
+	}
     }
     else
     {
@@ -772,6 +802,13 @@ static boolean		snl_pointeron = false;
 
 void WI_initShowNextLoc(void)
 {
+    // [crispy] display tally screen after ExM8
+    if ((gamemode != commercial) && (gamemap == 8))
+    {
+	G_WorldDone();
+	return;
+    }
+
     state = ShowNextLoc;
     acceleratestage = 0;
     cnt = SHOWNEXTLOCDELAY * TICRATE;
@@ -794,6 +831,7 @@ void WI_drawShowNextLoc(void)
 
     int		i;
     int		last;
+    extern boolean secretexit; // [crispy] Master Level support
 
     WI_slamBackground();
 
@@ -808,7 +846,7 @@ void WI_drawShowNextLoc(void)
 	    return;
 	}
 	
-	last = (wbs->last == 8) ? wbs->next - 1 : wbs->last;
+	last = (wbs->last == 8 || wbs->last == 9) ? wbs->next - 1 : wbs->last; // [crispy] support E1M10 "Sewers"
 
 	// draw a splat on taken cities.
 	for (i=0 ; i<=last ; i++)
@@ -818,10 +856,22 @@ void WI_drawShowNextLoc(void)
 	if (wbs->didsecret)
 	    WI_drawOnLnode(8, splat);
 
+	// [crispy] the splat for E1M10 "Sewers" is drawn only once,
+	// i.e. now, when returning from the level
+	// (and this is not going to change)
+	if (crispy->havee1m10 && wbs->epsd == 0 && wbs->last == 9)
+	    WI_drawOnLnode(9, splat);
+
 	// draw flashing ptr
 	if (snl_pointeron)
 	    WI_drawOnLnode(wbs->next, yah); 
     }
+
+    if (crispy->singleplayer && (
+        (gamemission == pack_nerve && wbs->last == 7) ||
+        (gamemission == pack_master && wbs->last == 19 && !secretexit) ||
+        (gamemission == pack_master && wbs->last == 20)))
+        return;
 
     // draws which level you are entering..
     if ( (gamemode != commercial)
@@ -1445,6 +1495,66 @@ void WI_updateStats(void)
 
 }
 
+// [crispy] conditionally draw par times on intermission screen
+static boolean WI_drawParTime (void)
+{
+	extern int bex_pars[4][10], bex_cpars[32];
+	extern lumpinfo_t *maplumpinfo;
+
+	boolean result = true;
+
+	// [crispy] PWADs have no par times (including The Master Levels)
+	if (!W_IsIWADLump(maplumpinfo))
+	{
+		result = false;
+	}
+
+	if (gamemode == commercial)
+	{
+		// [crispy] IWAD: Final Doom has no par times
+		if (gamemission == pack_tnt || gamemission == pack_plut)
+		{
+			result = false;
+		}
+
+		// [crispy] PWAD: NRFTL has par times (for singleplayer games)
+		if (gamemission == pack_nerve && crispy->singleplayer)
+		{
+			result = true;
+		}
+
+		// [crispy] IWAD/PWAD: BEX patch provided par times
+		if (bex_cpars[wbs->last])
+		{
+			result = true;
+		}
+	}
+	else
+	{
+		// [crispy] IWAD: Episode 4 has no par times
+		// (but we have for singleplayer games)
+		if (wbs->epsd == 3 && !crispy->singleplayer)
+		{
+			result = false;
+		}
+
+		// [crispy] IWAD/PWAD: BEX patch provided par times for Episode 4
+		// (disguised as par times for Doom II MAP02 to MAP10)
+		if (wbs->epsd == 3 && bex_cpars[wbs->last + 1])
+		{
+			result = true;
+		}
+
+		// [crispy] PWAD: BEX patch provided par times for Episodes 1-3
+		if (wbs->epsd < 3 && bex_pars[wbs->epsd + 1][wbs->last + 1])
+		{
+			result = true;
+		}
+	}
+
+	return result;
+}
+
 void WI_drawStats(void)
 {
     // line height
@@ -1460,28 +1570,54 @@ void WI_drawStats(void)
     WI_drawLF();
 
     V_DrawPatch(SP_STATSX, SP_STATSY, kills);
-    WI_drawPercent(SCREENWIDTH - SP_STATSX, SP_STATSY, cnt_kills[0]);
+    WI_drawPercent(ORIGWIDTH - SP_STATSX, SP_STATSY, cnt_kills[0]);
 
     V_DrawPatch(SP_STATSX, SP_STATSY+lh, items);
-    WI_drawPercent(SCREENWIDTH - SP_STATSX, SP_STATSY+lh, cnt_items[0]);
+    WI_drawPercent(ORIGWIDTH - SP_STATSX, SP_STATSY+lh, cnt_items[0]);
 
     V_DrawPatch(SP_STATSX, SP_STATSY+2*lh, sp_secret);
-    WI_drawPercent(SCREENWIDTH - SP_STATSX, SP_STATSY+2*lh, cnt_secret[0]);
+    WI_drawPercent(ORIGWIDTH - SP_STATSX, SP_STATSY+2*lh, cnt_secret[0]);
 
     V_DrawPatch(SP_TIMEX, SP_TIMEY, timepatch);
-    WI_drawTime(SCREENWIDTH/2 - SP_TIMEX, SP_TIMEY, cnt_time);
+    WI_drawTime(ORIGWIDTH/2 - SP_TIMEX, SP_TIMEY, cnt_time, true);
 
-    if (wbs->epsd < 3)
+    // [crispy] conditionally draw par times on intermission screen
+    if (WI_drawParTime())
     {
-        V_DrawPatch(SCREENWIDTH/2 + SP_TIMEX, SP_TIMEY, par);
+        V_DrawPatch(ORIGWIDTH/2 + SP_TIMEX, SP_TIMEY, par);
 
         // Emulation: don't draw partime value if map33
         if (gamemode != commercial || wbs->last != NUMCMAPS)
         {
-            WI_drawTime(SCREENWIDTH - SP_TIMEX, SP_TIMEY, cnt_par);
+            WI_drawTime(ORIGWIDTH - SP_TIMEX, SP_TIMEY, cnt_par, true);
         }
     }
 
+    // [crispy] draw total time after level time and par time
+    if (sp_state > 8)
+    {
+	const int ttime = wbs->totaltimes / TICRATE;
+	const boolean wide = (ttime > 61*59) || (SP_TIMEX + SHORT(total->width) >= ORIGWIDTH/4);
+
+	V_DrawPatch(SP_TIMEX, SP_TIMEY + 16, total);
+	// [crispy] choose x-position depending on width of time string
+	WI_drawTime((wide ? ORIGWIDTH : ORIGWIDTH/2) - SP_TIMEX, SP_TIMEY + 16, ttime, false);
+    }
+
+    // [crispy] demo timer widget
+    if ((demoplayback && (crispy->demotimer & DEMOTIMER_PLAYBACK)) ||
+        (demorecording && (crispy->demotimer & DEMOTIMER_RECORD)))
+    {
+	ST_DrawDemoTimer(leveltime);
+    }
+
+    // [crispy] demo progress bar
+    if (demoplayback && crispy->demobar)
+    {
+	extern void HU_DemoProgressBar (void);
+
+	HU_DemoProgressBar();
+    }
 }
 
 void WI_checkForAccelerate(void)
@@ -1527,6 +1663,9 @@ void WI_Ticker(void)
 	// intermission music
   	if ( gamemode == commercial )
 	  S_ChangeMusic(mus_dm2int, true);
+	// [crispy] Sigil
+	else if (crispy->haved1e5 && wbs->epsd == 4 && W_CheckNumForName(DEH_String("D_SIGINT")) != -1)
+	  S_ChangeMusic(mus_sigint, true);
 	else
 	  S_ChangeMusic(mus_inter, true); 
     }
@@ -1563,6 +1702,20 @@ static void WI_loadUnloadData(load_callback_t callback)
     char name[9];
     anim_t *a;
 
+    if (nervewadfile && gamemission == pack_nerve)
+    {
+	for (i=0 ; i<9 ; i++)
+	{
+	    DEH_snprintf(name, 9, "NWILV%2.2d", i);
+            callback(name, &lnames[i]);
+	}
+	for ( ; i<NUMCMAPS ; i++)
+	{
+	    DEH_snprintf(name, 9, "CWILV%2.2d", i);
+            callback(name, &lnames[i]);
+	}
+    }
+    else
     if (gamemode == commercial)
     {
 	for (i=0 ; i<NUMCMAPS ; i++)
@@ -1577,6 +1730,12 @@ static void WI_loadUnloadData(load_callback_t callback)
 	{
 	    DEH_snprintf(name, 9, "WILV%d%d", wbs->epsd, i);
             callback(name, &lnames[i]);
+	}
+	// [crispy] special-casing for E1M10 "Sewers" support
+	if (crispy->havee1m10)
+	{
+	    DEH_snprintf(name, 9, "SEWERS");
+	    callback(name, &lnames[i]);
 	}
 
 	// you are here
@@ -1697,9 +1856,19 @@ static void WI_loadUnloadData(load_callback_t callback)
     {
         M_StringCopy(name, DEH_String("INTERPIC"), sizeof(name));
     }
+    else if (crispy->haved1e5 && wbs->epsd == 4 && W_CheckNumForName(DEH_String("SIGILINT")) != -1) // [crispy] Sigil
+    {
+        M_StringCopy(name, DEH_String("SIGILINT"), sizeof(name));
+    }
     else
     {
 	DEH_snprintf(name, sizeof(name), "WIMAP%d", wbs->epsd);
+    }
+
+    // [crispy] if still in doubt, use INTERPIC
+    if (W_CheckNumForName(name) == -1)
+    {
+        M_StringCopy(name, DEH_String("INTERPIC"), sizeof(name));
     }
 
     // Draw backdrop and save to a temporary buffer
@@ -1709,21 +1878,29 @@ static void WI_loadUnloadData(load_callback_t callback)
 
 static void WI_loadCallback(const char *name, patch_t **variable)
 {
+  // [crispy] prevent crashes with maps without map title graphics lump
+  if (W_CheckNumForName(name) != -1)
     *variable = W_CacheLumpName(name, PU_STATIC);
+  else
+    *variable = NULL;
 }
 
 void WI_loadData(void)
 {
     if (gamemode == commercial)
     {
-	NUMCMAPS = 32;
+	NUMCMAPS = (crispy->havemap33) ? 33 : 32;
 	lnames = (patch_t **) Z_Malloc(sizeof(patch_t*) * NUMCMAPS,
 				       PU_STATIC, NULL);
+	num_lnames = NUMCMAPS;
     }
     else
     {
-	lnames = (patch_t **) Z_Malloc(sizeof(patch_t*) * NUMMAPS,
+	// [crispy] support E1M10 "Sewers"
+	int nummaps = crispy->havee1m10 ? NUMMAPS + 1 : NUMMAPS;
+	lnames = (patch_t **) Z_Malloc(sizeof(patch_t*) * nummaps,
 				       PU_STATIC, NULL);
+	num_lnames = nummaps;
     }
 
     WI_loadUnloadData(WI_loadCallback);

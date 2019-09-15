@@ -1,18 +1,11 @@
 <!--
-  Thank you for reporting a bug in Chocolate Doom. Please complete
-  the following template so that we can better diagnose the source
-  of your problem.
-
-  To save yourself some time, you may want to check the FAQ and the
-  NOT-BUGS list for solutions to some common problems:
-
-     https://www.chocolate-doom.org/wiki/index.php/FAQ
-     https://www.chocolate-doom.org/not-bugs
+  Thank you for reporting a bug in Crispy Doom. Please complete the following template
+  so that we can better diagnose the source of your problem.
 -->
 
 ### Background
 
-Version of Chocolate Doom:
+Version of Crispy Doom:
 
 Operating System and version:
 

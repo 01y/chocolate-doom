@@ -40,19 +40,22 @@ typedef struct
 // List of aspect ratio-uncorrected window sizes:
 static window_size_t window_sizes_unscaled[] =
 {
-    { 320,  200 },
+//  { 320,  200 }, // hires
     { 640,  400 },
     { 960,  600 },
     { 1280, 800 },
     { 1600, 1000 },
+    { 1920, 1200 }, // hires * 3
+    { 2560, 1600 }, // hires * 4
+    { 3200, 2000 }, // hires * 5
     { 0, 0},
 };
 
 // List of aspect ratio-corrected window sizes:
 static window_size_t window_sizes_scaled[] =
 {
-    { 320,  240 },
-    { 512,  400 },
+//  { 320,  240 }, // hires
+//  { 512,  400 }, // hires
     { 640,  480 },
     { 800,  600 },
     { 960,  720 },
@@ -60,6 +63,8 @@ static window_size_t window_sizes_scaled[] =
     { 1280, 960 },
     { 1600, 1200 },
     { 1920, 1440 },
+    { 2560, 1920 }, // hires * 4
+    { 3200, 2400 }, // hires * 5
     { 0, 0},
 };
 
@@ -71,15 +76,15 @@ static int vga_porch_flash = 0;
 static int force_software_renderer = 0;
 static int fullscreen = 1;
 static int fullscreen_width = 0, fullscreen_height = 0;
-static int window_width = 640, window_height = 480;
+static int window_width = 800, window_height = 600;
 static int startup_delay = 1000;
 static int max_scaling_buffer_pixels = 16000000;
 static int usegamma = 0;
 
-int graphical_startup = 1;
-int show_endoom = 1;
+int graphical_startup = 0; // [crispy]
+int show_endoom = 0; // [crispy]
 int show_diskicon = 1;
-int png_screenshots = 0;
+int png_screenshots = 1; // [crispy]
 
 static int system_video_env_set;
 
@@ -144,7 +149,7 @@ static void GenerateSizesTable(TXT_UNCAST_ARG(widget),
     int i;
 
     // Pick which window sizes list to use
-    if (aspect_ratio_correct)
+    if (aspect_ratio_correct == 1)
     {
         sizes = window_sizes_scaled;
     }
@@ -212,7 +217,7 @@ static void AdvancedDisplayConfig(TXT_UNCAST_ARG(widget),
     TXT_SignalConnect(ar_checkbox, "changed", GenerateSizesTable, sizes_table);
 }
 
-void ConfigDisplay(void)
+void ConfigDisplay(TXT_UNCAST_ARG(widget), void *user_data)
 {
     txt_window_t *window;
     txt_table_t *sizes_table;
