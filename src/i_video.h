@@ -31,15 +31,23 @@
 #define MAXWIDTH  (ORIGWIDTH << 1) // [crispy]
 #define MAXHEIGHT (ORIGHEIGHT << 1) // [crispy]
 
-extern int SCREENWIDTH;
-extern int SCREENHEIGHT;
+//extern int SCREENWIDTH;
+//extern int SCREENHEIGHT;
+
+//01y-todo: fix at 2x
+
+#define SCREENWIDTH 320
+#define SCREENHEIGHT 200
 
 // Screen height used when aspect_ratio_correct=true.
 
 #define ORIGHEIGHT_4_3 240 // [crispy]
 #define MAXHEIGHT_4_3 (ORIGHEIGHT_4_3 << 1) // [crispy]
 
-extern int SCREENHEIGHT_4_3;
+//extern int SCREENHEIGHT_4_3;
+
+//01y-todo: 2x
+#define SCREENHEIGHT_4_3 240
 
 typedef boolean (*grabmouse_callback_t)(void);
 

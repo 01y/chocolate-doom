@@ -1,6 +1,6 @@
-APPNAME := Chocolate Doom
-TITLE := CHOC66666
-VPKNAME := ChocolateDoom
+APPNAME := Crispy Doom
+TITLE := CRISPY123
+VPKNAME := CrispyDoom
 
 vpk: doom heretic hexen strife launcher
 	vita-mksfoex -s TITLE_ID="$(TITLE)" "$(APPNAME)" param.sfo

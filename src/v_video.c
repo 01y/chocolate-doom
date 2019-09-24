@@ -988,7 +988,8 @@ void WritePCXfile(char *filename, pixel_t *data,
     Z_Free (pcx);
 }
 
-#ifdef HAVE_LIBPNG
+#if 0
+//01y  #ifdef HAVE_LIBPNG
 //
 // WritePNGfile
 //
@@ -1179,7 +1180,8 @@ void V_ScreenShot(const char *format)
         }
     }
 
-#ifdef HAVE_LIBPNG
+#if 0
+//01y #ifdef HAVE_LIBPNG
     if (png_screenshots)
     {
     WritePNGfile(lbmname, I_VideoBuffer,

@@ -656,6 +656,11 @@ static inline void BlitBuffer(void)
     }
 }
 
+//01y
+// [AM] Fractional part of the current tic, in the half-open
+//      range of [0.0, 1.0).  Used for interpolation.
+fixed_t fractionaltic;
+
 //
 // I_FinishUpdate
 //
@@ -722,6 +727,12 @@ void I_FinishUpdate (void)
     );
     vita2d_end_drawing();
     vita2d_swap_buffers();
+
+    //01y
+    if (crispy->uncapped)
+    {
+	fractionaltic = I_GetTimeMS() * TICRATE % 1000 * FRACUNIT / 1000;
+    }
 
     // Restore background and undo the disk indicator, if it was drawn.
     V_RestoreDiskBackground();

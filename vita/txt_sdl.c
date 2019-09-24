@@ -133,6 +133,18 @@ extern void I_VitaInitSDLWindow(void);
 // Returns 1 if successful, 0 if an error occurred
 //
 
+//01y
+
+void TXT_SetColor(txt_color_t color, int r, int g, int b)
+{
+    SDL_Color c = {r, g, b, 0xff};
+
+    SDL_LockSurface(screenbuffer);
+    SDL_SetPaletteColors(screenbuffer->format->palette, &c, color, 1);
+    SDL_UnlockSurface(screenbuffer);
+}
+
+
 int TXT_Init(void)
 {
     font = &normal_font;

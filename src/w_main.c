@@ -205,6 +205,7 @@ boolean W_ParseCommandLine(void)
 // Load all WAD files from the given directory.
 void W_AutoLoadWADs(const char *path)
 {
+    /* //01y todo
     glob_t *glob;
     const char *filename;
 
@@ -222,6 +223,7 @@ void W_AutoLoadWADs(const char *path)
     }
 
     I_EndGlob(glob);
+    */
 }
 
 // Lump names that are unique to particular game types. This lets us check

@@ -1632,7 +1632,7 @@ void I_InitGraphics(void)
 }
 
 // [crispy] re-initialize only the parts of the rendering stack that are really necessary
-
+//01y todo: have a look
 void I_ReInitGraphics (int reinit)
 {
 	// [crispy] re-set rendering resolution and re-create framebuffers

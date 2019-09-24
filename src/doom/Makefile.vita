@@ -27,7 +27,19 @@ OBJS =\
 	r_main.o r_plane.o r_segs.o \
 	r_sky.o r_things.o s_sound.o \
 	sounds.o statdump.o st_lib.o \
-	st_stuff.o wi_stuff.o
+	st_stuff.o wi_stuff.o \
+	deh_bexincl.o \
+	deh_bexpars.o \
+	deh_bexptr.o \
+	m_crispy.o \
+	p_bexptr.o \
+	p_blockmap.o \
+	p_extsaveg.o \
+	p_extnodes.o \
+	r_bmaps.o \
+	r_swirl.o \
+	s_musinfo.o
+
 
 CFLAGS =\
 -mtune=cortex-a9 -mfpu=neon -mthumb                       \

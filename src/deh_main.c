@@ -447,6 +447,8 @@ int DEH_LoadFile(const char *filename)
 // Load all dehacked patches from the given directory.
 void DEH_AutoLoadPatches(const char *path)
 {
+    /*
+    //01y todo
     const char *filename;
     glob_t *glob;
 
@@ -464,6 +466,7 @@ void DEH_AutoLoadPatches(const char *path)
     }
 
     I_EndGlob(glob);
+    */
 }
 
 // Load dehacked file from WAD lump.

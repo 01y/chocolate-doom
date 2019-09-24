@@ -143,15 +143,15 @@ extern void P_SegLengths (boolean contrast_only);
 extern void R_ExecuteSetViewSize (void);
 extern void R_InitLightTables (void);
 extern void S_UpdateSndChannels (void);
-extern void I_ReInitGraphics (int reinit);
+//extern void I_ReInitGraphics (int reinit);
 
 static void M_CrispyToggleAspectRatioHook (void)
 {
-    aspect_ratio_correct = (aspect_ratio_correct + 1) % NUM_ASPECTRATIOS;
+//    aspect_ratio_correct = (aspect_ratio_correct + 1) % NUM_ASPECTRATIOS;
 
     // [crispy] re-set logical rendering resolution
 
-    I_ReInitGraphics(REINIT_ASPECTRATIO);
+//    I_ReInitGraphics(REINIT_ASPECTRATIO);
 }
 
 void M_CrispyToggleAspectRatio(int choice)
@@ -351,18 +351,19 @@ void M_CrispyToggleFullsounds(int choice)
 
 static void M_CrispyToggleHiresHook (void)
 {
-    crispy->hires = !crispy->hires;
+//01y
+//    crispy->hires = !crispy->hires;
 
     // [crispy] re-initialize framebuffers, textures and renderer
-    I_ReInitGraphics(REINIT_FRAMEBUFFERS | REINIT_TEXTURES | REINIT_ASPECTRATIO);
+//    I_ReInitGraphics(REINIT_FRAMEBUFFERS | REINIT_TEXTURES | REINIT_ASPECTRATIO);
     // [crispy] re-calculate framebuffer coordinates
-    R_ExecuteSetViewSize();
+//    R_ExecuteSetViewSize();
     // [crispy] re-draw bezel
-    R_FillBackScreen();
+//    R_FillBackScreen();
     // [crispy] re-calculate disk icon coordinates
-    EnableLoadingDisk();
+//    EnableLoadingDisk();
     // [crispy] re-calculate automap coordinates
-    AM_ReInit();
+//    AM_ReInit();
 }
 
 void M_CrispyToggleHires(int choice)
@@ -516,9 +517,9 @@ void M_CrispyToggleUncapped(int choice)
 
 void M_CrispyToggleVsyncHook (void)
 {
-    crispy->vsync = !crispy->vsync;
+//    crispy->vsync = !crispy->vsync;
 
-    I_ReInitGraphics(REINIT_RENDERER | REINIT_TEXTURES | REINIT_ASPECTRATIO);
+//    I_ReInitGraphics(REINIT_RENDERER | REINIT_TEXTURES | REINIT_ASPECTRATIO);
 }
 
 void M_CrispyToggleVsync(int choice)
